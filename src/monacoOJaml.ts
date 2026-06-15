@@ -54,16 +54,12 @@ export function configureOJamlMonaco(monaco: Monaco): void {
     surroundingPairs: [{ open: "(", close: ")" }],
     indentationRules: {
       increaseIndentPattern: /^\s*(?:let\b.*=\s*|let\s+rec\b.*=\s*|if\b.*\bthen\s*|else\s*|match\b.*\bwith\s*|\|.*->\s*|.*->\s*)$/,
-      decreaseIndentPattern: /^\s*\|/,
+      decreaseIndentPattern: /$^/,
     },
     onEnterRules: [
       {
         beforeText: /^\s*(?:let\b.*=\s*|let\s+rec\b.*=\s*|if\b.*\bthen\s*|else\s*|match\b.*\bwith\s*|\|.*->\s*|.*->\s*)$/,
         action: { indentAction: monaco.languages.IndentAction.Indent },
-      },
-      {
-        beforeText: /^\s*\|/,
-        action: { indentAction: monaco.languages.IndentAction.None, removeText: 2 },
       },
     ],
   });
