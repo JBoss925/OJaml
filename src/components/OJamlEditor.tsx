@@ -63,6 +63,9 @@ export function OJamlEditor({
     editorMonacoRef.current = monaco;
     modelRef.current = instance.getModel();
     modelRef.current?.updateOptions({ tabSize: 2, insertSpaces: true });
+    instance.addCommand(monaco.KeyCode.Tab, () => {
+      instance.trigger("ojaml-tab", "type", { text: "  " });
+    });
     monaco.editor.setTheme(theme === "dark" ? "ojaml-dark" : "ojaml-light");
     if (modelRef.current) {
       monaco.editor.setModelMarkers(modelRef.current, markerOwner, getOJamlSyntaxMarkers(source, monaco.MarkerSeverity.Error));
