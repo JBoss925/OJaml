@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { check } from "../src/check";
 import { compile } from "../src/compiler";
-import { getOJamlSyntaxMarkers } from "../src/monacoOJaml";
+import { getOJamlHoverInfo, getOJamlSyntaxMarkers } from "../src/monacoOJaml";
 import { parse } from "../src/parser";
 import { runOJaml } from "../src/runtime";
 
@@ -198,6 +198,22 @@ test("polymorphic arrays reject mixed element writes", () => {
   assert.match(markers[0].message, /Type mismatch/);
 });
 
+test("polymorphic maps reject mismatched keys and values", () => {
+  const badKey = getOJamlSyntaxMarkers(`let main =
+  let m = Map.set (Map.empty ()) "one" 1 in
+  Map.get m 2`, 8);
+
+  const badValue = getOJamlSyntaxMarkers(`let main =
+  let m = Map.set (Map.empty ()) "one" 1 in
+  let m = Map.set m "two" "nope" in
+  Map.get m "one"`, 8);
+
+  assert.equal(badKey.length, 1);
+  assert.match(badKey[0].message, /Type mismatch/);
+  assert.equal(badValue.length, 1);
+  assert.match(badValue[0].message, /Type mismatch/);
+});
+
 test("diagnostics cover undefined names, arity, branch mismatch, and non-exhaustive matches", () => {
   assert.match(getOJamlSyntaxMarkers(`let main = missing`, 8)[0].message, /Undefined name/);
   assert.match(getOJamlSyntaxMarkers(`let f x = x\nlet main = f 1 2`, 8)[0].message, /expects 1 argument/);
@@ -226,6 +242,29 @@ let main =
   assert.equal(mainLocals.get("nums"), "nums : int array");
   assert.equal(mainLocals.get("names"), "names : (string, int) map");
   assert.equal(mainLocals.get("add10"), "add10 : int -> int");
+});
+
+test("checker exposes instantiated stdlib token types for hovers", () => {
+  const source = `let main =
+  let names = Map.set (Map.empty ()) "ada" 1815 in
+  Map.get names "ada"`;
+  const checked = check(parse(source));
+  const mapGet = checked.tokens.find((token) => token.name === "Map.get");
+  const namesUse = checked.tokens.find((token) => token.name === "names" && token.span.start > source.indexOf("Map.get"));
+
+  assert.equal(mapGet?.detail, "Map.get : (string, int) map -> string -> int");
+  assert.equal(namesUse?.detail, "names : (string, int) map");
+});
+
+test("monaco hover describes typed and lexical tokens", () => {
+  const source = `let main = if true then 1 + 2 else 0`;
+  const main = getOJamlHoverInfo(source, source.indexOf("main"));
+  const keyword = getOJamlHoverInfo(source, source.indexOf("if"));
+  const operator = getOJamlHoverInfo(source, source.indexOf("+"));
+
+  assert.equal(main?.detail, "main : int");
+  assert.equal(keyword?.detail, "if keyword");
+  assert.equal(operator?.detail, "+ operator");
 });
 
 test("anonymous functions are first-class values", async () => {

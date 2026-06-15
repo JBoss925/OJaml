@@ -26,12 +26,27 @@ class Parser {
   private parseDeclaration(): Declaration {
     const start = this.expectKeyword("let").start;
     const recursive = this.matchKeyword("rec");
-    const name = this.expect("ident", "Expected binding name after let").text;
+    const nameToken = this.expect("ident", "Expected binding name after let");
+    const name = nameToken.text;
     const params: string[] = [];
-    while (this.at("ident")) params.push(this.advance().text);
+    const paramSpans = [];
+    while (this.at("ident")) {
+      const param = this.advance();
+      params.push(param.text);
+      paramSpans.push({ start: param.start, end: param.end });
+    }
     this.expect("equals", "Expected '=' in let binding");
     const value = this.parseExpr();
-    return { kind: "Let", recursive, name, params, value, span: { start, end: value.span.end } };
+    return {
+      kind: "Let",
+      recursive,
+      name,
+      nameSpan: { start: nameToken.start, end: nameToken.end },
+      params,
+      paramSpans,
+      value,
+      span: { start, end: value.span.end },
+    };
   }
 
   private parseExpr(): Expr {
@@ -53,22 +68,26 @@ class Parser {
 
   private parseLetIn(start: number): Expr {
     if (this.matchKeyword("rec")) throw new OJamlError("Local let rec is not implemented yet", this.previous().start, this.previous().end);
-    const name = this.expect("ident", "Expected local binding name").text;
+    const nameToken = this.expect("ident", "Expected local binding name");
+    const name = nameToken.text;
     this.expect("equals", "Expected '=' in local let");
     const value = this.parseExpr();
     this.expectKeyword("in");
     const body = this.parseExpr();
-    return { kind: "LetIn", name, value, body, span: { start, end: body.span.end } };
+    return { kind: "LetIn", name, nameSpan: { start: nameToken.start, end: nameToken.end }, value, body, span: { start, end: body.span.end } };
   }
 
   private parseFun(start: number): Expr {
     const params: string[] = [];
+    const paramSpans = [];
     do {
-      params.push(this.expect("ident", "Expected function parameter").text);
+      const param = this.expect("ident", "Expected function parameter");
+      params.push(param.text);
+      paramSpans.push({ start: param.start, end: param.end });
     } while (this.at("ident"));
     this.expect("arrow", "Expected '->' after function parameters");
     const body = this.parseExpr();
-    return { kind: "Fun", params, body, span: { start, end: body.span.end } };
+    return { kind: "Fun", params, paramSpans, body, span: { start, end: body.span.end } };
   }
 
   private parseMatch(start: number): Expr {

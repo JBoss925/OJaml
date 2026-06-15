@@ -14,11 +14,13 @@ type Type =
 type Binding = {
   type: Type;
   builtinDetail?: string;
+  documentation?: string;
 };
 
 export type CheckResult = {
   mainType: RuntimeMainType;
   symbols: CheckedSymbol[];
+  tokens: CheckedToken[];
 };
 
 export type CheckedSymbol = {
@@ -28,6 +30,33 @@ export type CheckedSymbol = {
   span?: SourceSpan;
   params?: Array<{ name: string; detail: string; span?: SourceSpan }>;
   locals?: Array<{ name: string; detail: string; span: SourceSpan }>;
+};
+
+export type CheckedToken = {
+  name: string;
+  detail: string;
+  kind: "function" | "value" | "builtin" | "keyword" | "literal" | "operator" | "delimiter";
+  span: SourceSpan;
+  documentation?: string;
+};
+
+export type StdlibSignature = {
+  name: string;
+  detail: string;
+  documentation: string;
+};
+
+type BuiltinSignature = StdlibSignature & {
+  createType: () => Type;
+};
+
+type PendingToken = Omit<CheckedToken, "detail"> & {
+  detail?: string;
+  type?: Type;
+};
+
+type CheckContext = {
+  tokens: PendingToken[];
 };
 
 let nextTypeVar = 0;
@@ -40,6 +69,7 @@ const unitType = prim("unit");
 export function check(program: Program): CheckResult {
   nextTypeVar = 0;
   const globals = builtins();
+  const context: CheckContext = { tokens: [] };
 
   for (const declaration of program.declarations) {
     if (globals.has(declaration.name)) throw new OJamlError(`Duplicate binding '${declaration.name}'`, declaration.span.start, declaration.span.end);
@@ -50,43 +80,104 @@ export function check(program: Program): CheckResult {
   if (!main) throw new OJamlError("Program must define 'main'", 0, 0);
   if (prune(main.type).kind === "fn") throw new OJamlError("Program 'main' must not take arguments", 0, 0);
 
-  for (const declaration of program.declarations) checkDeclaration(declaration, globals);
+  for (const declaration of program.declarations) checkDeclaration(declaration, globals, context);
 
   const mainType = prune(globals.get("main")!.type);
   if (!isRuntimeMainType(mainType)) {
     throw new OJamlError(`Program 'main' cannot return ${showType(mainType)} directly; print it or return int, bool, or unit`, 0, 0);
   }
-  return { mainType: mainType.name, symbols: collectCheckedSymbols(program, globals) };
+  return { mainType: mainType.name, symbols: collectCheckedSymbols(program, globals), tokens: finalizeTokens(context.tokens) };
+}
+
+export function getStdlibSignatures(): StdlibSignature[] {
+  return stdlibSignatures.map(({ name, detail, documentation }) => ({ name, detail, documentation }));
 }
 
 function builtins(): Map<string, Binding> {
-  const a = typeVar();
-  const b = typeVar();
-  const k = typeVar();
-  const v = typeVar();
-  return new Map<string, Binding>([
-    ["print", { type: fn([typeVar()], unitType), builtinDetail: "print : int|string -> unit" }],
-    ["Array.make", { type: fn([intType, a], app("array", [a])), builtinDetail: "Array.make : int -> 'a -> 'a array" }],
-    ["Array.length", { type: fn([app("array", [typeVar()])], intType), builtinDetail: "Array.length : 'a array -> int" }],
-    ["Array.get", { type: fn([app("array", [a]), intType], a), builtinDetail: "Array.get : 'a array -> int -> 'a" }],
-    ["Array.set", { type: fn([app("array", [a]), intType, a], unitType), builtinDetail: "Array.set : 'a array -> int -> 'a -> unit" }],
-    ["Array.map", { type: fn([fn([a], b), app("array", [a])], app("array", [b])), builtinDetail: "Array.map : ('a -> 'b) -> 'a array -> 'b array" }],
-    ["Array.iter", { type: fn([fn([a], unitType), app("array", [a])], unitType), builtinDetail: "Array.iter : ('a -> unit) -> 'a array -> unit" }],
-    ["Array.fold_left", { type: fn([fn([b, a], b), b, app("array", [a])], b), builtinDetail: "Array.fold_left : ('b -> 'a -> 'b) -> 'b -> 'a array -> 'b" }],
-    ["List.empty", { type: fn([unitType], app("list", [typeVar()])), builtinDetail: "List.empty : unit -> 'a list" }],
-    ["List.cons", { type: fn([a, app("list", [a])], app("list", [a])), builtinDetail: "List.cons : 'a -> 'a list -> 'a list" }],
-    ["List.head", { type: fn([app("list", [a])], a), builtinDetail: "List.head : 'a list -> 'a" }],
-    ["List.tail", { type: fn([app("list", [a])], app("list", [a])), builtinDetail: "List.tail : 'a list -> 'a list" }],
-    ["List.is_empty", { type: fn([app("list", [typeVar()])], boolType), builtinDetail: "List.is_empty : 'a list -> bool" }],
-    ["List.length", { type: fn([app("list", [typeVar()])], intType), builtinDetail: "List.length : 'a list -> int" }],
-    ["List.map", { type: fn([fn([a], b), app("list", [a])], app("list", [b])), builtinDetail: "List.map : ('a -> 'b) -> 'a list -> 'b list" }],
-    ["List.iter", { type: fn([fn([a], unitType), app("list", [a])], unitType), builtinDetail: "List.iter : ('a -> unit) -> 'a list -> unit" }],
-    ["List.fold_left", { type: fn([fn([b, a], b), b, app("list", [a])], b), builtinDetail: "List.fold_left : ('b -> 'a -> 'b) -> 'b -> 'a list -> 'b" }],
-    ["Map.empty", { type: fn([unitType], app("map", [typeVar(), typeVar()])), builtinDetail: "Map.empty : unit -> ('k, 'v) map" }],
-    ["Map.set", { type: fn([app("map", [k, v]), k, v], app("map", [k, v])), builtinDetail: "Map.set : ('k, 'v) map -> 'k -> 'v -> ('k, 'v) map" }],
-    ["Map.get", { type: fn([app("map", [k, v]), k], v), builtinDetail: "Map.get : ('k, 'v) map -> 'k -> 'v" }],
-    ["Map.has", { type: fn([app("map", [k, typeVar()]), k], boolType), builtinDetail: "Map.has : ('k, 'v) map -> 'k -> bool" }],
-  ]);
+  return new Map<string, Binding>(stdlibSignatures.map((signature) => [
+    signature.name,
+    { type: signature.createType(), builtinDetail: signature.detail, documentation: signature.documentation },
+  ]));
+}
+
+const stdlibSignatures: BuiltinSignature[] = [
+  builtin("print", "print : int|string -> unit", () => fn([typeVar()], unitType), "Prints an integer or string and returns unit."),
+  builtin("Array.make", "Array.make : int -> 'a -> 'a array", () => {
+    const a = typeVar();
+    return fn([intType, a], app("array", [a]));
+  }),
+  builtin("Array.length", "Array.length : 'a array -> int", () => fn([app("array", [typeVar()])], intType)),
+  builtin("Array.get", "Array.get : 'a array -> int -> 'a", () => {
+    const a = typeVar();
+    return fn([app("array", [a]), intType], a);
+  }),
+  builtin("Array.set", "Array.set : 'a array -> int -> 'a -> unit", () => {
+    const a = typeVar();
+    return fn([app("array", [a]), intType, a], unitType);
+  }),
+  builtin("Array.map", "Array.map : ('a -> 'b) -> 'a array -> 'b array", () => {
+    const a = typeVar();
+    const b = typeVar();
+    return fn([fn([a], b), app("array", [a])], app("array", [b]));
+  }),
+  builtin("Array.iter", "Array.iter : ('a -> unit) -> 'a array -> unit", () => {
+    const a = typeVar();
+    return fn([fn([a], unitType), app("array", [a])], unitType);
+  }),
+  builtin("Array.fold_left", "Array.fold_left : ('b -> 'a -> 'b) -> 'b -> 'a array -> 'b", () => {
+    const a = typeVar();
+    const b = typeVar();
+    return fn([fn([b, a], b), b, app("array", [a])], b);
+  }),
+  builtin("List.empty", "List.empty : unit -> 'a list", () => fn([unitType], app("list", [typeVar()]))),
+  builtin("List.cons", "List.cons : 'a -> 'a list -> 'a list", () => {
+    const a = typeVar();
+    return fn([a, app("list", [a])], app("list", [a]));
+  }),
+  builtin("List.head", "List.head : 'a list -> 'a", () => {
+    const a = typeVar();
+    return fn([app("list", [a])], a);
+  }),
+  builtin("List.tail", "List.tail : 'a list -> 'a list", () => {
+    const a = typeVar();
+    return fn([app("list", [a])], app("list", [a]));
+  }),
+  builtin("List.is_empty", "List.is_empty : 'a list -> bool", () => fn([app("list", [typeVar()])], boolType)),
+  builtin("List.length", "List.length : 'a list -> int", () => fn([app("list", [typeVar()])], intType)),
+  builtin("List.map", "List.map : ('a -> 'b) -> 'a list -> 'b list", () => {
+    const a = typeVar();
+    const b = typeVar();
+    return fn([fn([a], b), app("list", [a])], app("list", [b]));
+  }),
+  builtin("List.iter", "List.iter : ('a -> unit) -> 'a list -> unit", () => {
+    const a = typeVar();
+    return fn([fn([a], unitType), app("list", [a])], unitType);
+  }),
+  builtin("List.fold_left", "List.fold_left : ('b -> 'a -> 'b) -> 'b -> 'a list -> 'b", () => {
+    const a = typeVar();
+    const b = typeVar();
+    return fn([fn([b, a], b), b, app("list", [a])], b);
+  }),
+  builtin("Map.empty", "Map.empty : unit -> ('k, 'v) map", () => fn([unitType], app("map", [typeVar(), typeVar()]))),
+  builtin("Map.set", "Map.set : ('k, 'v) map -> 'k -> 'v -> ('k, 'v) map", () => {
+    const k = typeVar();
+    const v = typeVar();
+    return fn([app("map", [k, v]), k, v], app("map", [k, v]));
+  }),
+  builtin("Map.get", "Map.get : ('k, 'v) map -> 'k -> 'v", () => {
+    const k = typeVar();
+    const v = typeVar();
+    return fn([app("map", [k, v]), k], v);
+  }),
+  builtin("Map.has", "Map.has : ('k, 'v) map -> 'k -> bool", () => {
+    const k = typeVar();
+    const v = typeVar();
+    return fn([app("map", [k, v]), k], boolType);
+  }),
+];
+
+function builtin(name: string, detail: string, createType: () => Type, documentation = "OJaml standard library builtin."): BuiltinSignature {
+  return { name, detail, documentation, createType };
 }
 
 function makeDeclarationStub(declaration: Declaration): Type {
@@ -94,7 +185,7 @@ function makeDeclarationStub(declaration: Declaration): Type {
   return fn(declaration.params.map(() => typeVar()), typeVar());
 }
 
-function checkDeclaration(declaration: Declaration, globals: Map<string, Binding>): Type {
+function checkDeclaration(declaration: Declaration, globals: Map<string, Binding>, context: CheckContext): Type {
   const binding = globals.get(declaration.name)!;
   const locals = new Map<string, Type>();
   let expectedResult = binding.type;
@@ -104,56 +195,115 @@ function checkDeclaration(declaration: Declaration, globals: Map<string, Binding
     declaration.params.forEach((param, index) => locals.set(param, type.params[index]));
     expectedResult = type.result;
   }
-  const bodyType = checkExpr(declaration.value, globals, locals);
+  const bodyType = checkExpr(declaration.value, globals, locals, context);
   unify(expectedResult, bodyType, declaration.value.span);
+  const type = prune(binding.type);
+  context.tokens.push({
+    name: declaration.name,
+    kind: type.kind === "fn" ? "function" : "value",
+    type: binding.type,
+    span: declaration.nameSpan,
+  });
+  declaration.params.forEach((param, index) => {
+    context.tokens.push({
+      name: param,
+      kind: "value",
+      type: type.kind === "fn" ? type.params[index] : typeVar(),
+      span: declaration.paramSpans[index],
+    });
+  });
   return prune(binding.type);
 }
 
-function checkExpr(expr: Expr, globals: Map<string, Binding>, locals: Map<string, Type>): Type {
+function checkExpr(expr: Expr, globals: Map<string, Binding>, locals: Map<string, Type>, context: CheckContext): Type {
   switch (expr.kind) {
     case "Int":
+      context.tokens.push({ name: String(expr.value), kind: "literal", type: intType, span: expr.span });
       return intType;
     case "String":
+      context.tokens.push({ name: "string literal", kind: "literal", type: stringType, span: expr.span });
       return stringType;
     case "Bool":
+      context.tokens.push({ name: String(expr.value), kind: "literal", type: boolType, span: expr.span });
       return boolType;
     case "Unit":
+      context.tokens.push({ name: "()", kind: "literal", type: unitType, span: expr.span });
       return unitType;
     case "Var": {
       const local = locals.get(expr.name);
-      if (local) return local;
+      if (local) {
+        context.tokens.push({ name: expr.name, kind: "value", type: local, span: expr.span });
+        return local;
+      }
       const global = globals.get(expr.name);
       if (!global) throw new OJamlError(`Undefined name '${expr.name}'`, expr.span.start, expr.span.end);
-      return fresh(global.type);
+      const type = fresh(global.type);
+      const pruned = prune(type);
+      context.tokens.push({
+        name: expr.name,
+        kind: global.builtinDetail ? "builtin" : pruned.kind === "fn" ? "function" : "value",
+        type,
+        span: expr.span,
+        documentation: global.documentation,
+      });
+      return type;
     }
     case "Unary":
-      unify(checkExpr(expr.expr, globals, locals), intType, expr.span);
+      unify(checkExpr(expr.expr, globals, locals, context), intType, expr.span);
       return intType;
     case "Binary":
-      return checkBinary(expr, globals, locals);
+      return checkBinary(expr, globals, locals, context);
     case "If":
-      unify(checkExpr(expr.condition, globals, locals), boolType, expr.condition.span);
-      return sameBranches(checkExpr(expr.thenBranch, globals, locals), checkExpr(expr.elseBranch, globals, locals), expr.span);
+      unify(checkExpr(expr.condition, globals, locals, context), boolType, expr.condition.span);
+      return sameBranches(checkExpr(expr.thenBranch, globals, locals, context), checkExpr(expr.elseBranch, globals, locals, context), expr.span);
     case "LetIn": {
-      const valueType = checkExpr(expr.value, globals, locals);
+      const valueType = checkExpr(expr.value, globals, locals, context);
+      context.tokens.push({ name: expr.name, kind: "value", type: valueType, span: expr.nameSpan });
       const nested = new Map(locals);
       nested.set(expr.name, valueType);
-      return checkExpr(expr.body, globals, nested);
+      return checkExpr(expr.body, globals, nested, context);
     }
     case "Call": {
-      const isPrint = expr.callee.kind === "Var" && expr.callee.name === "print";
-      const targetType = expr.callee.kind === "Var" && globals.has(expr.callee.name)
-        ? fresh(globals.get(expr.callee.name)!.type)
-        : checkExpr(expr.callee, globals, locals);
-      if (isPrint) {
-        const argType = checkExpr(expr.args[0], globals, locals);
-        const arg = prune(argType);
-        if (arg.kind !== "var" && !(arg.kind === "prim" && (arg.name === "int" || arg.name === "string"))) {
-          throw new OJamlError(`print expects int or string; got ${showType(arg)}`, expr.args[0].span.start, expr.args[0].span.end);
+      if (expr.callee.kind === "Var") {
+        const binding = globals.get(expr.callee.name);
+        const targetType = resolveVarType(expr.callee, globals, locals);
+        if (expr.callee.name === "print") {
+          if (expr.args.length !== 1) {
+            throw new OJamlError(`Function expects 1 argument(s), got ${expr.args.length}`, expr.span.start, expr.span.end);
+          }
+          const argType = checkExpr(expr.args[0], globals, locals, context);
+          const arg = prune(argType);
+          if (arg.kind !== "var" && !(arg.kind === "prim" && (arg.name === "int" || arg.name === "string"))) {
+            throw new OJamlError(`print expects int or string; got ${showType(arg)}`, expr.args[0].span.start, expr.args[0].span.end);
+          }
+          context.tokens.push({
+            name: expr.callee.name,
+            kind: "builtin",
+            detail: arg.kind === "var" ? "print : int|string -> unit" : `print : ${showType(arg)} -> unit`,
+            span: expr.callee.span,
+            documentation: binding?.documentation,
+          });
+          return unitType;
         }
-        return unitType;
+        const argTypes = expr.args.map((arg) => checkExpr(arg, globals, locals, context));
+        const resultType = typeVar();
+        const pruned = prune(targetType);
+        if (pruned.kind === "fn" && pruned.params.length !== expr.args.length) {
+          throw new OJamlError(`Function expects ${pruned.params.length} argument(s), got ${expr.args.length}`, expr.span.start, expr.span.end);
+        }
+        unify(targetType, fn(argTypes, resultType), expr.span);
+        const resolved = prune(targetType);
+        context.tokens.push({
+          name: expr.callee.name,
+          kind: binding?.builtinDetail ? "builtin" : resolved.kind === "fn" ? "function" : "value",
+          type: targetType,
+          span: expr.callee.span,
+          documentation: binding?.documentation,
+        });
+        return resultType;
       }
-      const argTypes = expr.args.map((arg) => checkExpr(arg, globals, locals));
+      const targetType = checkExpr(expr.callee, globals, locals, context);
+      const argTypes = expr.args.map((arg) => checkExpr(arg, globals, locals, context));
       const resultType = typeVar();
       const pruned = prune(targetType);
       if (pruned.kind === "fn" && pruned.params.length !== expr.args.length) {
@@ -169,16 +319,20 @@ function checkExpr(expr: Expr, globals: Map<string, Binding>, locals: Map<string
         nested.set(param, paramType);
         return paramType;
       });
-      return fn(params, checkExpr(expr.body, globals, nested));
+      const result = checkExpr(expr.body, globals, nested, context);
+      expr.params.forEach((param, index) => {
+        context.tokens.push({ name: param, kind: "value", type: params[index], span: expr.paramSpans[index] });
+      });
+      return fn(params, result);
     }
     case "Match": {
-      const scrutineeType = checkExpr(expr.expr, globals, locals);
+      const scrutineeType = checkExpr(expr.expr, globals, locals, context);
       let resultType: Type | undefined;
       let hasCatchAll = false;
       for (const arm of expr.arms) {
         const nested = new Map(locals);
-        hasCatchAll ||= checkPattern(arm.pattern, scrutineeType, nested);
-        const armType = checkExpr(arm.body, globals, nested);
+        hasCatchAll ||= checkPattern(arm.pattern, scrutineeType, nested, context);
+        const armType = checkExpr(arm.body, globals, nested, context);
         resultType = resultType ? sameBranches(resultType, armType, arm.span) : armType;
       }
       if (!hasCatchAll) throw new OJamlError("Match must include a wildcard or variable catch-all arm", expr.span.start, expr.span.end);
@@ -187,39 +341,52 @@ function checkExpr(expr: Expr, globals: Map<string, Binding>, locals: Map<string
   }
 }
 
-function checkBinary(expr: Extract<Expr, { kind: "Binary" }>, globals: Map<string, Binding>, locals: Map<string, Type>): Type {
+function resolveVarType(expr: Extract<Expr, { kind: "Var" }>, globals: Map<string, Binding>, locals: Map<string, Type>): Type {
+  const local = locals.get(expr.name);
+  if (local) return local;
+  const global = globals.get(expr.name);
+  if (!global) throw new OJamlError(`Undefined name '${expr.name}'`, expr.span.start, expr.span.end);
+  return fresh(global.type);
+}
+
+function checkBinary(expr: Extract<Expr, { kind: "Binary" }>, globals: Map<string, Binding>, locals: Map<string, Type>, context: CheckContext): Type {
   if (expr.op === "&&" || expr.op === "||") {
-    unify(checkExpr(expr.left, globals, locals), boolType, expr.left.span);
-    unify(checkExpr(expr.right, globals, locals), boolType, expr.right.span);
+    unify(checkExpr(expr.left, globals, locals, context), boolType, expr.left.span);
+    unify(checkExpr(expr.right, globals, locals, context), boolType, expr.right.span);
     return boolType;
   }
   if (expr.op === "=" || expr.op === "<>") {
-    unify(checkExpr(expr.left, globals, locals), checkExpr(expr.right, globals, locals), expr.span);
+    unify(checkExpr(expr.left, globals, locals, context), checkExpr(expr.right, globals, locals, context), expr.span);
     return boolType;
   }
-  unify(checkExpr(expr.left, globals, locals), intType, expr.left.span);
-  unify(checkExpr(expr.right, globals, locals), intType, expr.right.span);
+  unify(checkExpr(expr.left, globals, locals, context), intType, expr.left.span);
+  unify(checkExpr(expr.right, globals, locals, context), intType, expr.right.span);
   return ["<", "<=", ">", ">="].includes(expr.op) ? boolType : intType;
 }
 
-function checkPattern(pattern: Pattern, scrutinee: Type, locals: Map<string, Type>): boolean {
+function checkPattern(pattern: Pattern, scrutinee: Type, locals: Map<string, Type>, context: CheckContext): boolean {
   switch (pattern.kind) {
     case "PInt":
       unify(scrutinee, intType, pattern.span);
+      context.tokens.push({ name: String(pattern.value), kind: "literal", type: intType, span: pattern.span });
       return false;
     case "PString":
       unify(scrutinee, stringType, pattern.span);
+      context.tokens.push({ name: "string literal", kind: "literal", type: stringType, span: pattern.span });
       return false;
     case "PBool":
       unify(scrutinee, boolType, pattern.span);
+      context.tokens.push({ name: String(pattern.value), kind: "literal", type: boolType, span: pattern.span });
       return false;
     case "PUnit":
       unify(scrutinee, unitType, pattern.span);
+      context.tokens.push({ name: "()", kind: "literal", type: unitType, span: pattern.span });
       return false;
     case "PWildcard":
       return true;
     case "PVar":
       locals.set(pattern.name, scrutinee);
+      context.tokens.push({ name: pattern.name, kind: "value", type: scrutinee, span: pattern.span });
       return true;
   }
 }
@@ -332,10 +499,26 @@ function typeMismatch(left: Type, right: Type, span: SourceSpan): OJamlError {
   return new OJamlError(`Type mismatch: ${showType(left)} vs ${showType(right)}`, span.start, span.end);
 }
 
+function finalizeTokens(tokens: PendingToken[]): CheckedToken[] {
+  return tokens
+    .filter((token) => token.span !== undefined)
+    .map((token) => ({
+      name: token.name,
+      kind: token.kind,
+      span: token.span,
+      documentation: token.documentation,
+      detail: token.detail ?? (token.type ? `${token.name} : ${showType(token.type)}` : token.name),
+    }));
+}
+
 function collectCheckedSymbols(program: Program, globals: Map<string, Binding>): CheckedSymbol[] {
   const symbols: CheckedSymbol[] = [];
   for (const [name, binding] of builtins()) {
-    symbols.push({ name, kind: "builtin", detail: binding.builtinDetail ?? `${name} : ${showType(binding.type)}` });
+    symbols.push({
+      name,
+      kind: "builtin",
+      detail: binding.builtinDetail ?? `${name} : ${showType(binding.type)}`,
+    });
   }
   for (const declaration of program.declarations) {
     const binding = globals.get(declaration.name);
@@ -345,11 +528,11 @@ function collectCheckedSymbols(program: Program, globals: Map<string, Binding>):
       name: declaration.name,
       kind: type.kind === "fn" ? "function" : "value",
       detail: `${declaration.name} : ${showType(type)}`,
-      span: declaration.span,
+      span: declaration.nameSpan,
       params: declaration.params.map((param, index) => ({
         name: param,
         detail: type.kind === "fn" ? `${param} : ${showType(type.params[index])}` : `${param} : unknown`,
-        span: declaration.span,
+        span: declaration.paramSpans[index],
       })),
       locals: collectLocalSymbols(declaration, globals),
     });
@@ -378,8 +561,8 @@ function collectLocalSymbolsInExpr(
 ): Type | undefined {
   switch (expr.kind) {
     case "LetIn": {
-      const valueType = checkExpr(expr.value, globals, locals);
-      symbols.push({ name: expr.name, detail: `${expr.name} : ${showType(valueType)}`, span: expr.span });
+      const valueType = checkExpr(expr.value, globals, locals, { tokens: [] });
+      symbols.push({ name: expr.name, detail: `${expr.name} : ${showType(valueType)}`, span: expr.nameSpan });
       const nested = new Map(locals);
       nested.set(expr.name, valueType);
       collectLocalSymbolsInExpr(expr.body, globals, nested, symbols);
@@ -403,12 +586,12 @@ function collectLocalSymbolsInExpr(
       return undefined;
     case "Fun": {
       const nested = new Map(locals);
-      const fnType = checkExpr(expr, globals, locals);
+      const fnType = checkExpr(expr, globals, locals, { tokens: [] });
       const pruned = prune(fnType);
       expr.params.forEach((param, index) => {
         const paramType = pruned.kind === "fn" ? pruned.params[index] : typeVar();
         nested.set(param, paramType);
-        symbols.push({ name: param, detail: `${param} : ${showType(paramType)}`, span: expr.span });
+        symbols.push({ name: param, detail: `${param} : ${showType(paramType)}`, span: expr.paramSpans[index] });
       });
       collectLocalSymbolsInExpr(expr.body, globals, nested, symbols);
       return undefined;
@@ -418,7 +601,7 @@ function collectLocalSymbolsInExpr(
       expr.arms.forEach((arm) => {
         const nested = new Map(locals);
         if (arm.pattern.kind === "PVar") {
-          const scrutineeType = checkExpr(expr.expr, globals, locals);
+          const scrutineeType = checkExpr(expr.expr, globals, locals, { tokens: [] });
           nested.set(arm.pattern.name, scrutineeType);
           symbols.push({ name: arm.pattern.name, detail: `${arm.pattern.name} : ${showType(scrutineeType)}`, span: arm.pattern.span });
         }

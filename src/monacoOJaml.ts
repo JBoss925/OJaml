@@ -1,7 +1,8 @@
 import type { Monaco } from "@monaco-editor/react";
 import type { editor, languages, Position } from "monaco-editor";
-import { check } from "./check";
+import { check, getStdlibSignatures } from "./check";
 import { OJamlError } from "./errors";
+import { lex, type Token } from "./lexer";
 import { parse } from "./parser";
 
 export const ojamlLanguageId = "ojaml";
@@ -10,28 +11,7 @@ export const markerOwner = "ojaml-language-service";
 let providersRegistered = false;
 
 const keywords = ["let", "rec", "in", "if", "then", "else", "true", "false", "fun", "match", "with", "mod"];
-const stdlibCompletions = [
-  ["Array.make", "Array.make : int -> 'a -> 'a array"],
-  ["Array.length", "Array.length : 'a array -> int"],
-  ["Array.get", "Array.get : 'a array -> int -> 'a"],
-  ["Array.set", "Array.set : 'a array -> int -> 'a -> unit"],
-  ["Array.map", "Array.map : ('a -> 'b) -> 'a array -> 'b array"],
-  ["Array.iter", "Array.iter : ('a -> unit) -> 'a array -> unit"],
-  ["Array.fold_left", "Array.fold_left : ('b -> 'a -> 'b) -> 'b -> 'a array -> 'b"],
-  ["List.empty", "List.empty : unit -> 'a list"],
-  ["List.cons", "List.cons : 'a -> 'a list -> 'a list"],
-  ["List.head", "List.head : 'a list -> 'a"],
-  ["List.tail", "List.tail : 'a list -> 'a list"],
-  ["List.is_empty", "List.is_empty : 'a list -> bool"],
-  ["List.length", "List.length : 'a list -> int"],
-  ["List.map", "List.map : ('a -> 'b) -> 'a list -> 'b list"],
-  ["List.iter", "List.iter : ('a -> unit) -> 'a list -> unit"],
-  ["List.fold_left", "List.fold_left : ('b -> 'a -> 'b) -> 'b -> 'a list -> 'b"],
-  ["Map.empty", "Map.empty : unit -> ('k, 'v) map"],
-  ["Map.set", "Map.set : ('k, 'v) map -> 'k -> 'v -> ('k, 'v) map"],
-  ["Map.get", "Map.get : ('k, 'v) map -> 'k -> 'v"],
-  ["Map.has", "Map.has : ('k, 'v) map -> 'k -> bool"],
-] as const;
+const stdlibCompletions = getStdlibSignatures();
 
 export function configureOJamlMonaco(monaco: Monaco): void {
   if (!monaco.languages.getLanguages().some((language: { id: string }) => language.id === ojamlLanguageId)) {
@@ -184,7 +164,25 @@ function registerOJamlProviders(monaco: Monaco): void {
         endColumn: word.endColumn,
       };
       const source = model.getValue();
+      const modulePrefix = getCompletionModulePrefix(model, position, word.startColumn);
       const symbols = collectSymbols(source);
+      if (modulePrefix) {
+        const moduleSuggestions = stdlibCompletions
+          .filter((signature) => signature.name.startsWith(`${modulePrefix}.`))
+          .map((signature) => {
+            const member = signature.name.slice(modulePrefix.length + 1);
+            return {
+              label: member,
+              kind: monaco.languages.CompletionItemKind.Function,
+              detail: signature.detail,
+              documentation: signature.documentation,
+              insertText: member,
+              range,
+              sortText: member,
+            };
+          });
+        return { suggestions: moduleSuggestions };
+      }
       const suggestions: languages.CompletionItem[] = [
         ...keywords.map((keyword) => ({
           label: keyword,
@@ -201,11 +199,12 @@ function registerOJamlProviders(monaco: Monaco): void {
           documentation: "Prints an integer or string and returns unit.",
           range,
         },
-        ...stdlibCompletions.map(([label, detail]) => ({
-          label,
+        ...stdlibCompletions.filter((signature) => signature.name !== "print").map((signature) => ({
+          label: signature.name,
           kind: monaco.languages.CompletionItemKind.Function,
-          detail,
-          insertText: label,
+          detail: signature.detail,
+          documentation: signature.documentation,
+          insertText: signature.name,
           range,
         })),
         {
@@ -246,13 +245,13 @@ function registerOJamlProviders(monaco: Monaco): void {
 
   monaco.languages.registerHoverProvider(ojamlLanguageId, {
     provideHover(model: editor.ITextModel, position: Position) {
-      const word = model.getWordAtPosition(position);
-      if (!word) return null;
       const source = model.getValue();
-      const symbol = findSymbolAt(source, model.getOffsetAt(position), word.word);
+      const symbol = getOJamlHoverInfo(source, model.getOffsetAt(position));
       if (!symbol) return null;
+      const start = offsetToPosition(source, symbol.span?.start ?? model.getOffsetAt(position));
+      const end = offsetToPosition(source, symbol.span?.end ?? model.getOffsetAt(position) + 1);
       return {
-        range: new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn),
+        range: new monaco.Range(start.line, start.column, end.line, end.column),
         contents: [
           { value: "```ocaml\n" + symbol.detail + "\n```" },
           ...(symbol.documentation ? [{ value: symbol.documentation }] : []),
@@ -287,9 +286,20 @@ function registerOJamlProviders(monaco: Monaco): void {
   });
 }
 
+function getCompletionModulePrefix(model: editor.ITextModel, position: Position, wordStartColumn: number): "Array" | "List" | "Map" | undefined {
+  const linePrefix = model.getValueInRange({
+    startLineNumber: position.lineNumber,
+    startColumn: 1,
+    endLineNumber: position.lineNumber,
+    endColumn: wordStartColumn,
+  });
+  const match = /(?:^|[^A-Za-z0-9_'.])(Array|List|Map)\.$/.exec(linePrefix);
+  return match?.[1] as "Array" | "List" | "Map" | undefined;
+}
+
 type SymbolInfo = {
   name: string;
-  kind: "function" | "value" | "builtin" | "keyword";
+  kind: "function" | "value" | "builtin" | "keyword" | "literal" | "operator" | "delimiter";
   detail: string;
   documentation?: string;
   span?: { start: number; end: number };
@@ -310,43 +320,47 @@ function collectSymbols(source: string): SymbolInfo[] {
   }
 }
 
-function findSymbolAt(source: string, offset: number, word: string): SymbolInfo | undefined {
-  if (keywords.includes(word)) return { name: word, kind: "keyword", detail: `${word} keyword` };
+export function getOJamlHoverInfo(source: string, offset: number): SymbolInfo | undefined {
   try {
     const checked = check(parse(source));
-    for (const symbol of checked.symbols) {
-      const local = symbol.locals?.find((item) => item.name === word && offset >= item.span.start && offset <= item.span.end);
-      if (local) return { name: local.name, kind: "value", detail: local.detail, span: local.span };
-      const param = symbol.params?.find((item) => item.name === word && (!symbol.span || (offset >= symbol.span.start && offset <= symbol.span.end)));
-      if (param) return { name: param.name, kind: "value", detail: param.detail, span: param.span };
-    }
-    const global = checked.symbols.find((symbol) => symbol.name === word);
-    if (global) {
-      return {
-        name: global.name,
-        kind: global.kind,
-        detail: global.detail,
-        documentation: global.kind === "builtin" ? "OJaml standard library builtin." : undefined,
-        span: global.span,
-      };
-    }
+    const token = checked.tokens.find((item) => offset >= item.span.start && offset < item.span.end);
+    if (token) return token;
   } catch {
-    return collectSymbols(source).find((symbol) => symbol.name === word);
+    const fallback = findLexicalHover(source, offset);
+    if (fallback) return fallback;
+    return fallbackBuiltins().find((symbol) => symbol.span && offset >= symbol.span.start && offset < symbol.span.end);
   }
+  return findLexicalHover(source, offset);
 }
 
 function fallbackBuiltins(): SymbolInfo[] {
-  return [{
-    name: "print",
-    kind: "builtin",
-    detail: "print : 'a -> unit",
-    documentation: "Prints integers and strings.",
-  }, ...stdlibCompletions.map(([name, detail]) => ({
-    name,
+  return stdlibCompletions.map((signature) => ({
+    name: signature.name,
     kind: "builtin" as const,
-    detail,
-    documentation: "OJaml standard library builtin.",
-  }))];
+    detail: signature.detail,
+    documentation: signature.documentation,
+  }));
+}
+
+function findLexicalHover(source: string, offset: number): SymbolInfo | undefined {
+  const token = lex(source).find((item) => item.kind !== "eof" && offset >= item.start && offset < item.end);
+  if (!token) return undefined;
+  return lexicalHover(token);
+}
+
+function lexicalHover(token: Token): SymbolInfo | undefined {
+  if (token.kind === "keyword") return { name: token.text, kind: "keyword", detail: `${token.text} keyword`, span: token };
+  if (token.kind === "int") return { name: token.text, kind: "literal", detail: `${token.text} : int`, span: token };
+  if (token.kind === "string") return { name: "string literal", kind: "literal", detail: "string literal : string", span: token };
+  if (token.kind === "operator" || token.kind === "equals" || token.kind === "arrow" || token.kind === "pipe") {
+    return { name: token.text, kind: "operator", detail: `${token.text} operator`, span: token };
+  }
+  if (token.kind === "lparen" || token.kind === "rparen") {
+    return { name: token.text, kind: "delimiter", detail: `${token.text} delimiter`, span: token };
+  }
+  if (token.kind === "semicolon2") return { name: token.text, kind: "delimiter", detail: ";; declaration separator", span: token };
+  if (token.kind === "ident") return { name: token.text, kind: "value", detail: `${token.text} identifier`, span: token };
+  return undefined;
 }
 
 function offsetToPosition(source: string, offset: number): { line: number; column: number } {
