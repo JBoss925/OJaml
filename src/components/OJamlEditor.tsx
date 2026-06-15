@@ -116,7 +116,8 @@ export function OJamlEditor({
       <section className="ojaml-workspace">
         <header className="ojaml-header">
           <div className="ojaml-brand">
-            <h1>OJaml</h1>
+            <span className="ojaml-brand-mark" aria-hidden="true">OJ</span>
+            <h1><span>O</span>Jaml</h1>
           </div>
           <div className="ojaml-controls">
             <label className="ojaml-select-label" htmlFor="example-select">Example</label>
