@@ -141,7 +141,7 @@ let main =
   },
 ];
 
-export const defaultExampleId = "factorial";
+export const defaultExampleId = "hello";
 
 export function getExample(id: string): OJamlExample {
   return ojamlExamples.find((example) => example.id === id) ?? ojamlExamples[0];
