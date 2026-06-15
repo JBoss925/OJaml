@@ -1,0 +1,219 @@
+:root {
+  color-scheme: dark;
+  --page: #050505;
+  --text: #f4f4f2;
+  --muted: #a5a5a1;
+  --label: #cacac4;
+  --accent: #20382d;
+  --accent-strong: #315642;
+  --accent-text: #f7faf6;
+  --surface: #101010;
+  --surface-raised: #181818;
+  --surface-flat: #0b0b0b;
+  --border: #2f2f2d;
+  --border-strong: #454541;
+  --shadow: rgba(0, 0, 0, 0.32);
+  color: var(--text);
+  background: var(--page);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --page: #eef1ed;
+  --text: #1e2420;
+  --muted: #5d675f;
+  --label: #36413a;
+  --accent: #20382d;
+  --accent-strong: #1f3329;
+  --accent-text: #f7faf6;
+  --surface: #fbfdfb;
+  --surface-raised: #f7faf6;
+  --surface-flat: #ffffff;
+  --border: #c6cec8;
+  --border-strong: #9da8a0;
+  --shadow: rgba(0, 0, 0, 0.05);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--page);
+}
+
+button,
+select {
+  font: inherit;
+}
+
+.ojaml-shell {
+  min-height: 100vh;
+  background: var(--page);
+  color: var(--text);
+}
+
+.ojaml-workspace {
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: auto minmax(440px, 1fr) minmax(180px, 26vh);
+}
+
+.ojaml-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 52px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-flat);
+}
+
+.ojaml-brand {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ojaml-brand h1 {
+  margin: 0;
+  font-size: 1.05rem;
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.ojaml-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.ojaml-select-label {
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
+.ojaml-controls select,
+.ojaml-button {
+  height: 32px;
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  background: var(--surface-raised);
+  color: var(--text);
+}
+
+.ojaml-controls select {
+  max-width: 160px;
+  padding: 0 26px 0 8px;
+}
+
+.ojaml-button {
+  min-width: 64px;
+  padding: 0 10px;
+  cursor: pointer;
+}
+
+.ojaml-button--ghost {
+  background: transparent;
+}
+
+.ojaml-button--primary,
+.ojaml-button:hover,
+.ojaml-controls select:hover {
+  border-color: var(--accent-strong);
+}
+
+.ojaml-button--primary {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.ojaml-button:focus-visible,
+.ojaml-controls select:focus-visible,
+.ojaml-terminal__tabs button:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 1px;
+}
+
+.ojaml-editor-frame {
+  min-width: 0;
+  min-height: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.ojaml-terminal {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 34px minmax(0, 1fr);
+  background: var(--surface-flat);
+}
+
+.ojaml-terminal__tabs {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-raised);
+}
+
+.ojaml-terminal__tabs button {
+  min-width: 112px;
+  border: 0;
+  border-right: 1px solid var(--border);
+  border-radius: 0;
+  padding: 0 12px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  text-align: left;
+}
+
+.ojaml-terminal__tabs button.is-active {
+  background: var(--surface-flat);
+  color: var(--text);
+  box-shadow: inset 0 2px 0 var(--accent-strong);
+}
+
+.ojaml-terminal__output {
+  min-height: 0;
+  margin: 0;
+  padding: 10px 12px 16px;
+  overflow: auto;
+  color: var(--text);
+  font: 0.86rem/1.55 "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 760px) {
+  .ojaml-workspace {
+    grid-template-rows: auto minmax(360px, 1fr) minmax(170px, 30vh);
+  }
+
+  .ojaml-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .ojaml-controls {
+    justify-content: flex-start;
+  }
+
+  .ojaml-controls select {
+    max-width: 100%;
+    flex: 1 1 180px;
+  }
+}
