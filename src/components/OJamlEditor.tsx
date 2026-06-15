@@ -62,6 +62,7 @@ export function OJamlEditor({
     editorRef.current = instance;
     editorMonacoRef.current = monaco;
     modelRef.current = instance.getModel();
+    modelRef.current?.updateOptions({ tabSize: 2, insertSpaces: true });
     monaco.editor.setTheme(theme === "dark" ? "ojaml-dark" : "ojaml-light");
     if (modelRef.current) {
       monaco.editor.setModelMarkers(modelRef.current, markerOwner, getOJamlSyntaxMarkers(source, monaco.MarkerSeverity.Error));
@@ -152,6 +153,7 @@ export function OJamlEditor({
               padding: { top: 10, bottom: 10 },
               tabSize: 2,
               insertSpaces: true,
+              detectIndentation: false,
               autoIndent: "full",
               formatOnType: true,
               tabCompletion: "off",
