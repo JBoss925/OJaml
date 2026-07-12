@@ -127,9 +127,11 @@ export const ojamlExamples: OJamlExample[] = [
   let labeled = ("origin", point) in
   let points = List.cons point (List.cons (0, 0) (List.empty ())) in
   let _ = println (String.concat "point = " (to_string point)) in
+  let _ = println (String.concat "x = " (to_string (fst point))) in
+  let _ = println (String.concat "y = " (to_string (snd point))) in
   let _ = println (String.concat "labeled = " (to_string labeled)) in
   let _ = println (String.concat "points = " (to_string points)) in
-  List.length points`,
+  fst point + snd point + List.length points`,
   },
   {
     id: "type-inference",

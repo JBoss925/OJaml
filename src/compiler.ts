@@ -205,6 +205,10 @@ function emitExpr(expr: Expr, context: EmitContext): string {
         const arg = expr.args[0];
         return `(call $host_to_string ${emitExpr(arg, context)} (i32.const ${context.strings.intern(typeDescriptor(context.exprType(arg)))}))`;
       }
+      if (expr.callee.kind === "Var" && (expr.callee.name === "fst" || expr.callee.name === "snd")) {
+        const offset = expr.callee.name === "fst" ? 4 : 8;
+        return `(i32.load (i32.add ${emitExpr(expr.args[0], context)} (i32.const ${offset})))`;
+      }
       if (expr.callee.kind === "Var" && (expr.callee.name === "Set.add" || expr.callee.name === "Set.has")) {
         const elementShape = context.exprType(expr.args[1]);
         const helper = elementShape.kind === "float"
@@ -765,6 +769,14 @@ function inferCallShape(expr: Extract<Expr, { kind: "Call" }>, types: Map<string
   if (name === "Float.of_int") return floatShape;
   if (name === "Float.to_int") return intShape;
   if (name === "to_string") return stringShape;
+  if (name === "fst") {
+    const tuple = inferSimpleType(expr.args[0], types);
+    return tuple.kind === "tuple" ? tuple.items[0] ?? unknownShape : unknownShape;
+  }
+  if (name === "snd") {
+    const tuple = inferSimpleType(expr.args[0], types);
+    return tuple.kind === "tuple" ? tuple.items[1] ?? unknownShape : unknownShape;
+  }
   if (name === "String.concat") return stringShape;
   if (name === "String.length") return intShape;
   if (name === "String.split") return { kind: "list", elem: stringShape };
@@ -917,6 +929,8 @@ function builtinArities(): Array<[string, number]> {
     ["Float.of_int", 1],
     ["Float.to_int", 1],
     ["to_string", 1],
+    ["fst", 1],
+    ["snd", 1],
     ["String.concat", 2],
     ["String.length", 1],
     ["String.split", 2],
@@ -952,6 +966,7 @@ function builtinReturnShape(name: string): ValueShape {
   if (name === "Float.of_int") return floatShape;
   if (name === "Float.to_int") return intShape;
   if (name === "to_string") return stringShape;
+  if (name === "fst" || name === "snd") return unknownShape;
   if (name === "String.concat") return stringShape;
   if (name === "String.length") return intShape;
   if (name === "String.split") return { kind: "list", elem: stringShape };

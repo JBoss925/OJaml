@@ -108,6 +108,16 @@ const stdlibSignatures: BuiltinSignature[] = [
   builtin("Float.of_int", "Float.of_int : int -> float", () => fn([intType], floatType)),
   builtin("Float.to_int", "Float.to_int : float -> int", () => fn([floatType], intType)),
   builtin("to_string", "to_string : 'a -> string", () => fn([typeVar()], stringType), "Converts any OJaml value into a printable string."),
+  builtin("fst", "fst : ('a, 'b) -> 'a", () => {
+    const a = typeVar();
+    const b = typeVar();
+    return fn([app("tuple", [a, b])], a);
+  }, "Returns the first element of a pair."),
+  builtin("snd", "snd : ('a, 'b) -> 'b", () => {
+    const a = typeVar();
+    const b = typeVar();
+    return fn([app("tuple", [a, b])], b);
+  }, "Returns the second element of a pair."),
   builtin("String.concat", "String.concat : string -> string -> string", () => fn([stringType, stringType], stringType)),
   builtin("String.length", "String.length : string -> int", () => fn([stringType], intType)),
   builtin("String.split", "String.split : string -> string -> string list", () => fn([stringType, stringType], app("list", [stringType]))),

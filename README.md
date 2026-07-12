@@ -39,6 +39,7 @@ Supported language features:
 - `if ... then ... else`
 - OCaml-style `match ... with | pat -> expr`
 - Wildcard, int, float, string, bool, unit, and variable patterns
+- Pair projection with `fst` and `snd`
 - Polymorphic arrays, lists, sets, maps, tuples in heap-backed values, and higher-order collection functions
 - `print : int|float|string -> unit`
 - `println : int|float|string -> unit`
@@ -51,6 +52,8 @@ Supported language features:
 print : int|float|string -> unit
 println : int|float|string -> unit
 to_string : 'a -> string
+fst : ('a, 'b) -> 'a
+snd : ('a, 'b) -> 'b
 
 Float.of_int : int -> float
 Float.to_int : float -> int

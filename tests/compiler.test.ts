@@ -690,6 +690,21 @@ test("tuples work inside arrays, lists, maps, and sets", async () => {
   assert.equal(result.output, "[(3, 4), (5, 6)]\n[(origin, (3, 4)), (next, (5, 6))]\n{ points: [(3, 4), (5, 6)] }\n{ (3, 4) }\n");
 });
 
+test("fst and snd project pair elements with precise types", async () => {
+  const result = await runOJaml(`let main =
+  let point = (3, 4) in
+  let label = ("x", fst point) in
+  let nested = (label, (2.5, "two")) in
+  let _ = println (String.concat "fst point = " (to_string (fst point))) in
+  let _ = println (String.concat "snd point = " (to_string (snd point))) in
+  let _ = println (String.concat "fst label = " (fst label)) in
+  let _ = println (String.concat "snd nested = " (to_string (snd nested))) in
+  fst point + snd point + snd label`);
+
+  assert.equal(result.value, 10);
+  assert.equal(result.output, "fst point = 3\nsnd point = 4\nfst label = x\nsnd nested = (2.5, two)\n");
+});
+
 test("tuple element types and arity are checked structurally", () => {
   const cases = [
     `let main = if true then (1, "ok") else (2, 3)`,
@@ -703,6 +718,22 @@ test("tuple element types and arity are checked structurally", () => {
     const markers = getOJamlSyntaxMarkers(source, 8);
     assert.equal(markers.length, 1, source);
     assert.match(markers[0].message, /Type mismatch/, source);
+  }
+});
+
+test("fst and snd reject non-pairs and arity mismatches", () => {
+  const cases = [
+    `let main = fst 1`,
+    `let main = snd (1, 2, 3)`,
+    `let main =
+  let pair = (1, "one") in
+  fst pair + snd pair`,
+  ];
+
+  for (const source of cases) {
+    const markers = getOJamlSyntaxMarkers(source, 8);
+    assert.equal(markers.length, 1, source);
+    assert.match(markers[0].message, /Type mismatch|Operator expects/, source);
   }
 });
 
@@ -741,7 +772,7 @@ const expectedExampleResults: Map<string, { mainType: string; value: number; out
   ["lists", { mainType: "int", value: 3, output: "items = [first, second, third]\nrest = [second, third]\nlength = 3\n" }],
   ["maps", { mainType: "int", value: 1906, output: "years = { Grace: 1906, Ada: 1815 }\nAda = 1815\nGrace = found\n" }],
   ["sets", { mainType: "int", value: 2, output: "names = { Grace, Ada }\nhas Ada = true\n" }],
-  ["tuples", { mainType: "int", value: 2, output: "point = (3, 4)\nlabeled = (origin, (3, 4))\npoints = [(3, 4), (0, 0)]\n" }],
+  ["tuples", { mainType: "int", value: 9, output: "point = (3, 4)\nx = 3\ny = 4\nlabeled = (origin, (3, 4))\npoints = [(3, 4), (0, 0)]\n" }],
   ["type-inference", { mainType: "int", value: 87, output: "square 9 = 81\nsquare 2.5 = 6.25\n" }],
   ["pattern-matching", { mainType: "unit", value: 0, output: "many\none\none point five\nother\n" }],
   ["factorial", { mainType: "int", value: 720, output: "720\n" }],
@@ -904,6 +935,18 @@ test("checker exposes tuple token and local types for hovers", () => {
   assert.equal(mainLocals.get("pair"), "pair : (int, string)");
   assert.equal(mainLocals.get("nested"), "nested : ((int, string), bool)");
   assert.equal(tupleToken?.detail, "tuple : (int, string)");
+});
+
+test("checker exposes fst and snd instantiated tuple types for hovers", () => {
+  const source = `let main =
+  let pair = ("Ada", 1815) in
+  snd pair`;
+  const checked = check(parse(source));
+  const fstSig = checked.symbols.find((symbol) => symbol.name === "fst");
+  const sndToken = checked.tokens.find((token) => token.name === "snd");
+
+  assert.equal(fstSig?.detail, "fst : ('a, 'b) -> 'a");
+  assert.equal(sndToken?.detail, "snd : (string, int) -> int");
 });
 
 test("monaco hover describes typed and lexical tokens", () => {
