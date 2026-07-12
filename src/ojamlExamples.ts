@@ -85,6 +85,16 @@ let main =
   String.length (head words) + List.length nums + to_int (of_int 3)`,
   },
   {
+    id: "sequencing",
+    title: "Sequencing",
+    source: `let main =
+  println "first";
+  println "second";
+  let items = List.cons 1 (List.cons 2 (List.cons 3 (List.empty ()))) in
+  println (String.concat "items = " (to_string items));
+  List.length items`,
+  },
+  {
     id: "arrays",
     title: "Arrays",
     source: `let main =

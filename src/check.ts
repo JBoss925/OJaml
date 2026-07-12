@@ -486,6 +486,9 @@ function checkExpr(expr: Expr, globals: Map<string, Binding>, locals: Map<string
       return requireNumeric(checkExpr(expr.expr, globals, locals, context), expr.span);
     case "Binary":
       return checkBinary(expr, globals, locals, context);
+    case "Sequence":
+      unify(checkExpr(expr.first, globals, locals, context), unitType, expr.first.span);
+      return checkExpr(expr.second, globals, locals, context);
     case "If":
       unify(checkExpr(expr.condition, globals, locals, context), boolType, expr.condition.span);
       return sameBranches(checkExpr(expr.thenBranch, globals, locals, context), checkExpr(expr.elseBranch, globals, locals, context), expr.span);
@@ -1092,6 +1095,10 @@ function collectLocalSymbolsInExpr(
     case "Binary":
       collectLocalSymbolsInExpr(expr.left, globals, locals, symbols, types, constructors, openAliases);
       collectLocalSymbolsInExpr(expr.right, globals, locals, symbols, types, constructors, openAliases);
+      return undefined;
+    case "Sequence":
+      collectLocalSymbolsInExpr(expr.first, globals, locals, symbols, types, constructors, openAliases);
+      collectLocalSymbolsInExpr(expr.second, globals, locals, symbols, types, constructors, openAliases);
       return undefined;
     case "Unary":
       collectLocalSymbolsInExpr(expr.expr, globals, locals, symbols, types, constructors, openAliases);

@@ -12,7 +12,7 @@ OJaml is an OCaml-inspired language implemented in TypeScript and compiled to We
 - Browser editor/playground with Monaco completions, diagnostics, and hover metadata.
 - Node CLI for local compile/run workflows.
 - Reusable package exports for the editor component, examples, compiler, and runtime helpers.
-- Test suite covering parser, checker, runtime, stdlib, closures, high-arity calls, tuples, records, algebraic data types, sets, maps, structural patterns, power, runtime access checks, exact editor-example transcripts, and compiler specialization regressions.
+- Test suite covering parser, checker, runtime, stdlib, sequencing, closures, high-arity calls, tuples, records, algebraic data types, sets, maps, structural patterns, power, runtime access checks, exact editor-example transcripts, and compiler specialization regressions.
 
 ## Language Snapshot
 
@@ -24,7 +24,7 @@ let rec fact n =
   | _ -> n * fact (n - 1)
 
 let main =
-  let _ = println "Hello, OJaml!" in
+  println "Hello, OJaml!";
   fact 6
 ```
 
@@ -37,6 +37,7 @@ Supported language features:
 - Integers, floats, booleans, strings, unit, tuples, structural records, and algebraic data types
 - Record and algebraic data type declarations, including type parameters, plus value and function parameter annotations such as `let ada : person = ...` and `let describe (person : person) = ...`
 - Integer and float arithmetic, right-associative power `**`, comparison, equality, boolean, and integer `mod` operators
+- Sequencing with `expr; expr`; the left side must return `unit`, and the whole sequence has the right side's type
 - Polymorphic functions, including constrained numeric variables displayed as `number -> number` and emitted with concrete int/float call-site specializations
 - `if ... then ... else`
 - OCaml-style `match ... with | pat -> expr`

@@ -31,6 +31,21 @@ let main = length (cons 1 (empty ()))`);
   assert.equal(asLet(ast.declarations[1]).name, "main");
 });
 
+test("parses sequence expressions without stealing record field separators", () => {
+  const ast = parse(`let main =
+  print "start";
+  let person = { name = "Ada"; year = 1815 } in
+  (println person.name; person.year)`);
+  const main = asLet(ast.declarations[0]).value;
+
+  assert.equal(main.kind, "Sequence");
+  assert.equal(main.first.kind, "Call");
+  assert.equal(main.second.kind, "LetIn");
+  assert.equal(main.second.value.kind, "Record");
+  assert.equal(main.second.value.fields.length, 2);
+  assert.equal(main.second.body.kind, "Sequence");
+});
+
 test("parses top-level recursive function", () => {
   const ast = parse(`let rec fact n = if n <= 1 then 1 else n * fact (n - 1)\nlet main = fact 5`);
   const fact = asLet(ast.declarations[0]);
@@ -534,6 +549,45 @@ test("print returns unit and records output", async () => {
   assert.equal(result.value, 18);
   assert.deepEqual(result.prints, [7, 11]);
   assert.equal(result.output, "711");
+});
+
+test("sequence expressions run side effects in order and return the final expression", async () => {
+  const result = await runOJaml(`let main =
+  print "a";
+  println "b";
+  print "c";
+  42`);
+
+  assert.equal(result.mainType, "int");
+  assert.equal(result.value, 42);
+  assert.equal(result.output, "ab\nc");
+});
+
+test("sequence expressions work inside functions, matches, and closures", async () => {
+  const result = await runOJaml(`let apply f x = f x
+
+let main =
+  let seen = apply (fun x -> print (to_string x); x + 1) 4 in
+  match seen with
+  | 5 -> println "five"; seen
+  | _ -> println "other"; 0`);
+
+  assert.equal(result.value, 5);
+  assert.equal(result.output, "4five\n");
+});
+
+test("sequence expressions require unit on the left side", () => {
+  const cases = [
+    `let main = 1; 2`,
+    `let main = (if true then 1 else 2); 3`,
+    `let main = { name = "Ada"; year = 1815 }.year; 0`,
+  ];
+
+  for (const source of cases) {
+    const markers = getOJamlSyntaxMarkers(source, 8);
+    assert.equal(markers.length, 1, source);
+    assert.match(markers[0].message, /Type mismatch/, source);
+  }
 });
 
 test("unit can be the main result", async () => {
@@ -1715,6 +1769,7 @@ const expectedExampleResults: Map<string, { mainType: string; value: number; out
   ["float-operators", { mainType: "float", value: 14, output: "7.5 + 2.5 = 10\na - 1 = 9\nb * 2.0 = 18\nc / 3 = 6\n2.0 ** 3 = 8\n" }],
   ["strings", { mainType: "int", value: 11, output: "greeting = hello world\nwords = [hello, world]\nlength = 11\n" }],
   ["open-modules", { mainType: "int", value: 10, output: "words = [hello, OJaml]\nhead = hello\nnums = [1, 2]\n" }],
+  ["sequencing", { mainType: "int", value: 3, output: "first\nsecond\nitems = [1, 2, 3]\n" }],
   ["arrays", { mainType: "int", value: 60, output: "scores = [10, 20, 30]\nlength = 3\ntotal = 60\n" }],
   ["lists", { mainType: "int", value: 3, output: "items = [first, second, third]\nfirst = first\nrest = [second, third]\nlength = 3\n" }],
   ["maps", { mainType: "int", value: 1906, output: "years = { Grace: 1906, Ada: 1815 }\nAda = 1815\nGrace = found\n" }],

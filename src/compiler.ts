@@ -207,6 +207,11 @@ function emitExpr(expr: Expr, context: EmitContext): string {
       return `(i32.sub (i32.const 0) ${emitExpr(expr.expr, context)})`;
     case "Binary":
       return emitBinary(expr, context);
+    case "Sequence":
+      return `(block (result i32)
+  (drop ${emitExpr(expr.first, context)})
+  ${emitExpr(expr.second, context)}
+)`;
     case "If":
       return `(if (result i32) ${emitExpr(expr.condition, context)}
   (then ${emitExpr(expr.thenBranch, context)})
@@ -1041,6 +1046,10 @@ function walkTypes(expr: Expr, types: Map<string, ValueShape>, openAliases = new
       walkTypes(expr.value, types, openAliases);
       walkTypes(expr.body, types, openAliases);
       break;
+    case "Sequence":
+      walkTypes(expr.first, types, openAliases);
+      walkTypes(expr.second, types, openAliases);
+      break;
     case "Binary":
       walkTypes(expr.left, types, openAliases);
       walkTypes(expr.right, types, openAliases);
@@ -1107,6 +1116,8 @@ function inferSimpleType(expr: Expr, types: Map<string, ValueShape>, openAliases
       return inferSimpleType(expr.thenBranch, types, openAliases);
     case "LetIn":
       return inferSimpleType(expr.body, types, openAliases);
+    case "Sequence":
+      return inferSimpleType(expr.second, types, openAliases);
     case "Call":
       return inferCallShape(expr, types, openAliases);
     case "Match":
@@ -1207,6 +1218,10 @@ function walk(expr: Expr, locals: Set<string>, state: { matchId: number }): void
       walk(expr.left, locals, state);
       walk(expr.right, locals, state);
       break;
+    case "Sequence":
+      walk(expr.first, locals, state);
+      walk(expr.second, locals, state);
+      break;
     case "Tuple":
       expr.items.forEach((item) => walk(item, locals, state));
       break;
@@ -1258,6 +1273,10 @@ function freeVars(expr: Expr, bound: Set<string>): Set<string> {
     case "Binary":
       addAll(freeVars(expr.left, bound));
       addAll(freeVars(expr.right, bound));
+      break;
+    case "Sequence":
+      addAll(freeVars(expr.first, bound));
+      addAll(freeVars(expr.second, bound));
       break;
     case "Tuple":
       expr.items.forEach((item) => addAll(freeVars(item, bound)));
@@ -1313,6 +1332,8 @@ function countCalls(expr: Expr): number {
       return countCalls(expr.expr);
     case "Binary":
       return countCalls(expr.left) + countCalls(expr.right);
+    case "Sequence":
+      return countCalls(expr.first) + countCalls(expr.second);
     case "Tuple":
       return expr.items.reduce((sum, item) => sum + countCalls(item), 0);
     case "TupleAccess":

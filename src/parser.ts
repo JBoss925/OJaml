@@ -119,6 +119,17 @@ class Parser {
   }
 
   private parseExpr(): Expr {
+    return this.parseSequence();
+  }
+
+  private parseSequence(): Expr {
+    const first = this.parseNonSequence();
+    if (!this.match("semicolon")) return first;
+    const second = this.parseSequence();
+    return { kind: "Sequence", first, second, span: { start: first.span.start, end: second.span.end } };
+  }
+
+  private parseNonSequence(): Expr {
     if (this.matchKeyword("if")) return this.parseIf(this.previous().start);
     if (this.matchKeyword("let")) return this.parseLetIn(this.previous().start);
     if (this.matchKeyword("fun")) return this.parseFun(this.previous().start);
@@ -494,7 +505,7 @@ class Parser {
       do {
         const field = this.expect("ident", "Expected record field name");
         this.expect("equals", "Expected '=' in record expression");
-        fields.push({ name: field.text, nameSpan: { start: field.start, end: field.end }, value: this.parseExpr() });
+        fields.push({ name: field.text, nameSpan: { start: field.start, end: field.end }, value: this.parseNonSequence() });
       } while (this.match("semicolon"));
     }
     this.expect("rbrace", "Expected '}' in record expression");
