@@ -7,7 +7,7 @@ export type Program = {
   declarations: TopLevelDeclaration[];
 };
 
-export type TopLevelDeclaration = Declaration | TypeDeclaration | OpenDeclaration;
+export type TopLevelDeclaration = Declaration | TypeDeclaration | OpenDeclaration | ModuleDeclaration;
 
 export type OpenDeclaration = {
   kind: "Open";
@@ -24,6 +24,14 @@ export type TypeDeclaration = {
   body:
     | { kind: "Record"; fields: Array<{ name: string; nameSpan: SourceSpan; type: TypeExpr }> }
     | { kind: "Variant"; constructors: Array<{ name: string; nameSpan: SourceSpan; payload?: TypeExpr }> };
+  span: SourceSpan;
+};
+
+export type ModuleDeclaration = {
+  kind: "Module";
+  name: string;
+  nameSpan: SourceSpan;
+  declarations: Declaration[];
   span: SourceSpan;
 };
 

@@ -96,6 +96,31 @@ let main =
   String.length (head words) + List.length nums + to_int (of_int 3)`,
   },
   {
+    id: "user-modules",
+    title: "User Modules",
+    source: `module Scores = struct
+  let bonus = 4
+  let total first second = first + second + bonus
+  let make_offset scale =
+    fun value -> value * scale + bonus
+end
+
+open Scores
+
+let bonus = 1
+
+let main =
+  let offset = Scores.make_offset 3 in
+  let direct = Scores.total 10 20 in
+  let opened = total 5 6 in
+  let local = bonus in
+  let _ = println (String.concat "Scores.total 10 20 = " (to_string direct)) in
+  let _ = println (String.concat "total 5 6 = " (to_string opened)) in
+  let _ = println (String.concat "offset 7 = " (to_string (offset 7))) in
+  let _ = println (String.concat "local bonus = " (to_string local)) in
+  direct + opened + offset 7 + local`,
+  },
+  {
     id: "sequencing",
     title: "Sequencing",
     source: `let main =

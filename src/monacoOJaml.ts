@@ -10,7 +10,7 @@ export const markerOwner = "ojaml-language-service";
 
 let providersRegistered = false;
 
-const keywords = ["let", "rec", "in", "if", "then", "else", "true", "false", "fun", "match", "with", "mod", "type", "of", "open", "not"];
+const keywords = ["let", "rec", "in", "if", "then", "else", "true", "false", "fun", "match", "with", "mod", "type", "of", "open", "not", "module", "struct", "end"];
 const stdlibCompletions = getStdlibSignatures();
 
 export function configureOJamlMonaco(monaco: Monaco): void {
@@ -172,20 +172,13 @@ function registerOJamlProviders(monaco: Monaco): void {
       const modulePrefix = getCompletionModulePrefix(model, position, word.startColumn);
       const symbols = collectSymbols(source);
       if (modulePrefix) {
-        const moduleSuggestions = stdlibCompletions
+        const stdlibSuggestions = stdlibCompletions
           .filter((signature) => signature.name.startsWith(`${modulePrefix}.`))
-          .map((signature) => {
-            const member = signature.name.slice(modulePrefix.length + 1);
-            return {
-              label: member,
-              kind: monaco.languages.CompletionItemKind.Function,
-              detail: signature.detail,
-              documentation: signature.documentation,
-              insertText: member,
-              range,
-              sortText: member,
-            };
-          });
+          .map((signature) => moduleCompletion(monaco, signature.name, modulePrefix, signature.detail, signature.documentation, range));
+        const symbolSuggestions = symbols
+          .filter((symbol) => symbol.name.startsWith(`${modulePrefix}.`))
+          .map((symbol) => moduleCompletion(monaco, symbol.name, modulePrefix, symbol.detail, symbol.documentation, range));
+        const moduleSuggestions = dedupeCompletionItems([...stdlibSuggestions, ...symbolSuggestions]);
         return { suggestions: moduleSuggestions };
       }
       const suggestions: languages.CompletionItem[] = [
@@ -295,15 +288,45 @@ function registerOJamlProviders(monaco: Monaco): void {
   });
 }
 
-function getCompletionModulePrefix(model: editor.ITextModel, position: Position, wordStartColumn: number): "Array" | "Float" | "List" | "Map" | "Set" | "String" | undefined {
+function moduleCompletion(
+  monaco: Monaco,
+  name: string,
+  modulePrefix: string,
+  detail: string,
+  documentation: string | undefined,
+  range: languages.CompletionItem["range"],
+): languages.CompletionItem {
+  const member = name.slice(modulePrefix.length + 1);
+  return {
+    label: member,
+    kind: detail.includes(" -> ") ? monaco.languages.CompletionItemKind.Function : monaco.languages.CompletionItemKind.Variable,
+    detail,
+    documentation,
+    insertText: member,
+    range,
+    sortText: member,
+  };
+}
+
+function dedupeCompletionItems(items: languages.CompletionItem[]): languages.CompletionItem[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const key = String(item.label);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function getCompletionModulePrefix(model: editor.ITextModel, position: Position, wordStartColumn: number): string | undefined {
   const linePrefix = model.getValueInRange({
     startLineNumber: position.lineNumber,
     startColumn: 1,
     endLineNumber: position.lineNumber,
     endColumn: wordStartColumn,
   });
-  const match = /(?:^|[^A-Za-z0-9_'.])(Array|Float|List|Map|Set|String)\.$/.exec(linePrefix);
-  return match?.[1] as "Array" | "Float" | "List" | "Map" | "Set" | "String" | undefined;
+  const match = /(?:^|[^A-Za-z0-9_'.])([A-Z][A-Za-z0-9_']*)\.$/.exec(linePrefix);
+  return match?.[1];
 }
 
 type SymbolInfo = {

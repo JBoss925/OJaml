@@ -1,4 +1,4 @@
-import type { Declaration, Expr, OpenDeclaration, Pattern, Program } from "./ast";
+import type { Declaration, Expr, ModuleDeclaration, OpenDeclaration, Pattern, Program } from "./ast";
 import { check, type CheckedSymbol, type CheckedToken, type OJamlType, type RuntimeMainType } from "./check";
 import { parse } from "./parser";
 
@@ -14,6 +14,7 @@ type LambdaInfo = {
   params: string[];
   body: Expr;
   captures: string[];
+  scopedAliases: Map<string, string>;
 };
 
 type ConstructorInfo = {
@@ -120,7 +121,7 @@ function emitDeclaration(
   for (const param of declaration.params) locals.add(param);
   const localTypes = collectLocalTypes(declaration, globalTypes, checkedLocals, openAliases);
   const localLines = [...locals].filter((name) => !declaration.params.includes(name)).map((name) => `  (local $${safe(name)} i32)`);
-  const body = emitExpr(declaration.value, new EmitContext(globals, locals, localTypes, globalTypes, strings, tokenTypes, constructors, openAliases));
+  const body = emitExpr(declaration.value, new EmitContext(globals, locals, localTypes, globalTypes, strings, tokenTypes, constructors, openAliases, new Map(), moduleMemberAliases(declaration.name, globals)));
   const head = `(func $${safe(nameOverride)} ${params}${params ? " " : ""}(result i32)`;
   return [head, ...localLines, indent(body, 2), ")"].join("\n");
 }
@@ -140,6 +141,7 @@ class EmitContext {
     readonly constructors = new Map<string, ConstructorInfo>(),
     readonly openAliases = new Map<string, string>(),
     readonly captured = new Map<string, number>(),
+    readonly scopedAliases = new Map<string, string>(),
   ) {}
 
   nextMatchLocal(): string {
@@ -161,7 +163,9 @@ class EmitContext {
   }
 
   resolveName(name: string): string {
-    if (this.locals.has(name) || this.captured.has(name) || this.globals.has(name)) return name;
+    if (this.locals.has(name) || this.captured.has(name)) return name;
+    if (this.scopedAliases.has(name)) return this.scopedAliases.get(name)!;
+    if (this.globals.has(name)) return name;
     return this.openAliases.get(name) || name;
   }
 }
@@ -199,8 +203,11 @@ function emitExpr(expr: Expr, context: EmitContext): string {
       if (context.constructors.has(expr.name) && !context.constructors.get(expr.name)!.hasPayload) return emitVariantConstructor(context.constructors.get(expr.name)!);
       if (context.locals.has(expr.name)) return `(local.get $${safe(expr.name)})`;
       if (context.captured.has(expr.name)) return `(i32.load (i32.add (local.get $__env) (i32.const ${4 + context.captured.get(expr.name)! * 4})))`;
-      if (context.globals.get(expr.name) === 0) return `(call $${safe(expr.name)})`;
-      if (context.globals.has(expr.name)) return emitTopLevelClosure(functionValueName(expr.name, context.exprType(expr)));
+      {
+        const resolvedName = context.resolveName(expr.name);
+        if (context.globals.get(resolvedName) === 0) return `(call $${safe(resolvedName)})`;
+        if (context.globals.has(resolvedName)) return emitTopLevelClosure(functionValueName(resolvedName, context.exprType(expr)));
+      }
       return `(local.get $${safe(expr.name)})`;
     case "Unary":
       if (expr.op === "not") return `(i32.eqz ${emitExpr(expr.expr, context)})`;
@@ -626,7 +633,7 @@ function emitClosure(expr: Extract<Expr, { kind: "Fun" }>, context: EmitContext,
   const captures = [...freeVars(expr.body, new Set(expr.params))].filter((name) => context.locals.has(name) || context.captured.has(name));
   const id = nextLambdaId++;
   const index = nextTableIndex++;
-  lambdaInfos.push({ id, index, params: expr.params, body: expr.body, captures });
+  lambdaInfos.push({ id, index, params: expr.params, body: expr.body, captures, scopedAliases: new Map(context.scopedAliases) });
   const stores = captures.map((name, captureIndex) => {
     const value = name === selfName
       ? `(local.get $__closure)`
@@ -686,7 +693,7 @@ function emitPendingLambdas(
       .filter((name) => !lambda.params.includes(name))
       .map((name) => `  (local $${safe(name)} i32)`);
     const params = lambda.params.map((param) => `(param $${safe(param)} i32)`).join(" ");
-    const body = emitExpr(lambda.body, new EmitContext(globals, locals, localTypes, globalTypes, strings, tokenTypes, constructors, openAliases, captured));
+    const body = emitExpr(lambda.body, new EmitContext(globals, locals, localTypes, globalTypes, strings, tokenTypes, constructors, openAliases, captured, lambda.scopedAliases));
     emitted.push([`(func $__lambda_${lambda.id} (param $__env i32) ${params} (result i32)`, ...localLines, indent(body, 2), ")"].join("\n"));
   }
   return emitted.join("\n\n");
@@ -734,15 +741,20 @@ const unitShape: ValueShape = { kind: "unit" };
 const unknownShape: ValueShape = { kind: "unknown" };
 
 function letDeclarations(program: Program): Declaration[] {
-  return program.declarations.filter((declaration): declaration is Declaration => declaration.kind === "Let");
+  return program.declarations.flatMap((declaration) => {
+    if (declaration.kind === "Let") return [declaration];
+    if (declaration.kind === "Module") return declaration.declarations;
+    return [];
+  });
 }
 
 function collectOpenAliases(program: Program): Map<string, string> {
   const aliases = new Map<string, string>();
   const ambiguous = new Set<string>();
   const openDeclarations = program.declarations.filter((declaration): declaration is OpenDeclaration => declaration.kind === "Open");
+  const moduleDeclarations = program.declarations.filter((declaration): declaration is ModuleDeclaration => declaration.kind === "Module");
   for (const declaration of openDeclarations) {
-    if (!openableModules.has(declaration.module)) continue;
+    if (!openableModules.has(declaration.module) && !moduleDeclarations.some((moduleDeclaration) => moduleDeclaration.name === declaration.module)) continue;
     for (const [name] of builtinArities()) {
       const prefix = `${declaration.module}.`;
       if (!name.startsWith(prefix)) continue;
@@ -750,8 +762,27 @@ function collectOpenAliases(program: Program): Map<string, string> {
       if (aliases.has(alias) && aliases.get(alias) !== name) ambiguous.add(alias);
       else if (!ambiguous.has(alias)) aliases.set(alias, name);
     }
+    const moduleDeclaration = moduleDeclarations.find((item) => item.name === declaration.module);
+    for (const member of moduleDeclaration?.declarations ?? []) {
+      const alias = member.name.slice(declaration.module.length + 1);
+      if (aliases.has(alias) && aliases.get(alias) !== member.name) ambiguous.add(alias);
+      else if (!ambiguous.has(alias)) aliases.set(alias, member.name);
+    }
   }
   for (const alias of ambiguous) aliases.delete(alias);
+  return aliases;
+}
+
+function moduleMemberAliases(name: string, globals: Map<string, number>): Map<string, string> {
+  const dot = name.indexOf(".");
+  if (dot < 0) return new Map();
+  const prefix = name.slice(0, dot + 1);
+  const aliases = new Map<string, string>();
+  for (const key of globals.keys()) {
+    if (!key.startsWith(prefix)) continue;
+    const alias = key.slice(prefix.length);
+    if (!alias.includes(".")) aliases.set(alias, key);
+  }
   return aliases;
 }
 

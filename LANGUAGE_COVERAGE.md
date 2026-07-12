@@ -12,7 +12,7 @@ This matrix tracks features currently implemented by the parser, checker, WASM b
 | Tuple expressions | yes | Tuples |
 | Structural record expressions and field access | yes | Records |
 | Record and algebraic data type declarations, including type parameters, plus value and function parameter annotations | yes | Records, Algebraic Data Types |
-| Top-level `open` declarations for built-in stdlib namespaces | yes | Open Modules |
+| Top-level value modules and `open` declarations for built-in and user-defined namespaces | yes | Open Modules, User Modules |
 | Tuple projection with `.0`, `.1`, ... plus pair helpers `fst`/`snd` | yes | Tuples |
 | String escapes | yes | test suite |
 | Integer and float arithmetic, power, comparison, boolean, unary operators | yes | Language Tour |
@@ -46,4 +46,4 @@ This matrix tracks features currently implemented by the parser, checker, WASM b
 | Negative type diagnostics across primitives and stdlib calls | yes | test suite |
 | Exact editor-example output transcripts | yes | all examples |
 
-Not yet implemented: user-defined modules, file imports, exceptions, garbage collection, and recoverable language-level runtime exceptions.
+Not yet implemented: file imports, nested modules, module type/signature declarations, exceptions, garbage collection, and recoverable language-level runtime exceptions.

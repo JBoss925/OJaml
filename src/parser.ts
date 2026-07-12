@@ -1,8 +1,8 @@
-import type { BinaryOp, Declaration, Expr, MatchArm, OpenDeclaration, Pattern, Program, TopLevelDeclaration, TypeDeclaration, TypeExpr } from "./ast";
+import type { BinaryOp, Declaration, Expr, MatchArm, ModuleDeclaration, OpenDeclaration, Pattern, Program, TopLevelDeclaration, TypeDeclaration, TypeExpr } from "./ast";
 import { OJamlError } from "./errors";
 import { lex, type Token } from "./lexer";
 
-const expressionTerminators = new Set(["then", "else", "in", "with"]);
+const expressionTerminators = new Set(["then", "else", "in", "with", "end"]);
 
 export function parse(source: string): Program {
   return new Parser(lex(source)).parseProgram();
@@ -19,6 +19,7 @@ class Parser {
       if (this.match("semicolon2")) continue;
       if (this.at("keyword", "type")) declarations.push(this.parseTypeDeclaration());
       else if (this.at("keyword", "open")) declarations.push(this.parseOpenDeclaration());
+      else if (this.at("keyword", "module")) declarations.push(this.parseModuleDeclaration());
       else declarations.push(this.parseDeclaration());
       this.match("semicolon2");
     }
@@ -33,6 +34,34 @@ class Parser {
       module: module.text,
       moduleSpan: { start: module.start, end: module.end },
       span: { start, end: module.end },
+    };
+  }
+
+  private parseModuleDeclaration(): ModuleDeclaration {
+    const start = this.expectKeyword("module").start;
+    const nameToken = this.expect("ident", "Expected module name after module");
+    if (!/^[A-Z]/.test(nameToken.text)) {
+      throw new OJamlError("Module names must start with an uppercase letter", nameToken.start, nameToken.end);
+    }
+    this.expect("equals", "Expected '=' in module declaration");
+    this.expectKeyword("struct");
+    const declarations: Declaration[] = [];
+    while (!this.at("keyword", "end")) {
+      if (this.at("eof")) throw new OJamlError("Expected 'end' to close module", nameToken.start, nameToken.end);
+      if (this.at("keyword", "type") || this.at("keyword", "open") || this.at("keyword", "module")) {
+        throw new OJamlError("Only value bindings are supported inside modules", this.peek().start, this.peek().end);
+      }
+      const declaration = this.parseDeclaration(`${nameToken.text}.`);
+      declarations.push(declaration);
+      this.match("semicolon2");
+    }
+    const end = this.expectKeyword("end").end;
+    return {
+      kind: "Module",
+      name: nameToken.text,
+      nameSpan: { start: nameToken.start, end: nameToken.end },
+      declarations,
+      span: { start, end },
     };
   }
 
@@ -87,11 +116,11 @@ class Parser {
     return params;
   }
 
-  private parseDeclaration(): Declaration {
+  private parseDeclaration(namePrefix = ""): Declaration {
     const start = this.expectKeyword("let").start;
     const recursive = this.matchKeyword("rec");
     const nameToken = this.expect("ident", "Expected binding name after let");
-    const name = nameToken.text;
+    const name = `${namePrefix}${nameToken.text}`;
     const params: string[] = [];
     const paramSpans = [];
     const paramAnnotations = [];

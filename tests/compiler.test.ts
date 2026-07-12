@@ -12,6 +12,11 @@ function asLet(declaration: ReturnType<typeof parse>["declarations"][number]) {
   return declaration;
 }
 
+function asModule(declaration: ReturnType<typeof parse>["declarations"][number]) {
+  assert.equal(declaration.kind, "Module");
+  return declaration;
+}
+
 test("parses comments, semicolon separators, and module-style identifiers", () => {
   const ast = parse(`(* nested (* comment *) works *)
 let make = Array.make;;
@@ -28,6 +33,22 @@ let main = length (cons 1 (empty ()))`);
 
   assert.equal(ast.declarations[0].kind, "Open");
   assert.equal(ast.declarations[0].kind === "Open" ? ast.declarations[0].module : undefined, "List");
+  assert.equal(asLet(ast.declarations[1]).name, "main");
+});
+
+test("parses top-level value modules", () => {
+  const ast = parse(`module Math = struct
+  let double x = x * 2
+  let triple x = x * 3
+end
+
+let main = Math.double 4 + Math.triple 5`);
+  const moduleDeclaration = asModule(ast.declarations[0]);
+
+  assert.equal(moduleDeclaration.name, "Math");
+  assert.equal(moduleDeclaration.declarations.length, 2);
+  assert.equal(moduleDeclaration.declarations[0].name, "Math.double");
+  assert.equal(moduleDeclaration.declarations[1].name, "Math.triple");
   assert.equal(asLet(ast.declarations[1]).name, "main");
 });
 
@@ -904,6 +925,67 @@ test("open declarations reject unknown modules and ambiguous names", () => {
   const cases = [
     `open Missing\nlet main = 0`,
     `open List\nopen Map\nlet main = empty ()`,
+  ];
+
+  for (const source of cases) {
+    assert.ok(getOJamlSyntaxMarkers(source, 8).length > 0, source);
+  }
+});
+
+test("user-defined modules expose qualified values and functions", async () => {
+  const result = await runOJaml(`module Math = struct
+  let bias = 7
+  let affine x scale = x * scale + bias
+end
+
+module Words = struct
+  let shout value = String.concat value "!"
+  let size value = String.length (shout value)
+end
+
+let main =
+  Math.affine 5 3 + Words.size "go"`);
+
+  assert.equal(result.value, 25);
+});
+
+test("open declarations expose user-defined module members and preserve shadowing", async () => {
+  const result = await runOJaml(`module Math = struct
+  let value = 10
+  let bump x = x + value
+end
+
+open Math
+
+let value = 3
+
+let main =
+  let bump x = x * 2 in
+  bump value + Math.bump value`);
+
+  assert.equal(result.value, 19);
+});
+
+test("module member closures resolve sibling module values", async () => {
+  const result = await runOJaml(`module Offsets = struct
+  let base = 4
+  let make scale =
+    fun value -> value * scale + base
+end
+
+let main =
+  let f = Offsets.make 3 in
+  f 5`);
+
+  assert.equal(result.value, 19);
+});
+
+test("user-defined modules reject duplicates, unknown opens, and nested modules", () => {
+  const cases = [
+    `module Math = struct let value = 1 end\nlet Math.value = 2\nlet main = 0`,
+    `module Math = struct let value = 1 let value = 2 end\nlet main = 0`,
+    `module Math = struct let value = 1 end\nopen Missing\nlet main = 0`,
+    `module Outer = struct module Inner = struct let value = 1 end end\nlet main = 0`,
   ];
 
   for (const source of cases) {
@@ -1888,6 +1970,7 @@ const expectedExampleResults: Map<string, { mainType: string; value: number; out
   ["boolean-logic", { mainType: "int", value: 3, output: "closed = false\nready = true\n" }],
   ["strings", { mainType: "int", value: 11, output: "greeting = hello world\nwords = [hello, world]\nlength = 11\n" }],
   ["open-modules", { mainType: "int", value: 10, output: "words = [hello, OJaml]\nhead = hello\nnums = [1, 2]\n" }],
+  ["user-modules", { mainType: "int", value: 75, output: "Scores.total 10 20 = 34\ntotal 5 6 = 15\noffset 7 = 25\nlocal bonus = 1\n" }],
   ["sequencing", { mainType: "int", value: 3, output: "first\nsecond\nitems = [1, 2, 3]\n" }],
   ["pipeline", { mainType: "int", value: 12, output: "nums = [1, 2, 3]\ntotal = 12\n" }],
   ["arrays", { mainType: "int", value: 60, output: "scores = [10, 20, 30]\nlength = 3\ntotal = 60\n" }],
