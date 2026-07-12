@@ -8,7 +8,7 @@ OJaml is an OCaml-inspired language implemented in TypeScript and compiled to We
 - Static checks for bindings, calls, branches, pattern matches, and standard-library usage.
 - Polymorphic type inference for functions and collection builtins.
 - First-class functions and closures with captured locals.
-- WebAssembly text backend using a uniform `i32` value representation plus concrete int/float specializations for numeric-polymorphic functions.
+- WebAssembly text backend using a uniform `i32` value representation plus concrete int/float specializations for polymorphic functions.
 - Browser editor/playground with Monaco completions, diagnostics, and hover metadata.
 - Node CLI for local compile/run workflows.
 - Test suite covering parser, checker, runtime, stdlib, closures, exact editor-example transcripts, and compiler specialization regressions.
@@ -34,7 +34,7 @@ Supported language features:
 - Anonymous functions and first-class function values
 - Integers, floats, booleans, strings, and unit
 - Integer and float arithmetic, right-associative power `**`, comparison, equality, boolean, and integer `mod` operators
-- Numeric-polymorphic helpers displayed as `number -> number` and emitted with concrete int/float call-site specializations
+- Polymorphic functions, including constrained numeric variables displayed as `number -> number` and emitted with concrete int/float call-site specializations
 - `if ... then ... else`
 - OCaml-style `match ... with | pat -> expr`
 - Wildcard, int, float, string, bool, unit, and variable patterns
@@ -127,7 +127,7 @@ examples/             CLI-friendly source examples
 
 ## Runtime Model
 
-The WebAssembly backend uses a uniform `i32` representation. Integers and booleans are immediate values; heap-backed values such as floats, strings, arrays, lists, sets, maps, and closures are represented as pointers. Float arithmetic and power unbox operands to `f64`; `int ** int` returns an int, while any float operand makes `**` return a boxed float. Numeric-polymorphic top-level functions receive concrete int/float specializations when call sites require different runtime representations. The checker is responsible for rejecting invalid programs before emission.
+The WebAssembly backend uses a uniform `i32` representation. Integers and booleans are immediate values; heap-backed values such as floats, strings, arrays, lists, sets, maps, and closures are represented as pointers. Float arithmetic and power unbox operands to `f64`; `int ** int` returns an int, while any float operand makes `**` return a boxed float. Polymorphic top-level functions receive concrete int/float specializations when call sites require different runtime representations. The checker is responsible for rejecting invalid programs before emission.
 
 ## Troubleshooting
 

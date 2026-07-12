@@ -114,7 +114,7 @@ test("negative float base with fractional exponent produces NaN", async () => {
   assert.equal(result.output, "NaN\n");
 });
 
-test("power operator works inside numeric-polymorphic functions", async () => {
+test("power operator works inside polymorphic functions", async () => {
   const result = await runOJaml(`let square x = x ** 2
 let raise base exponent = base ** exponent
 
@@ -686,7 +686,7 @@ test("lexer, parser, and hover treat power as a single right-associative operato
   assert.equal(hover?.detail, "** operator");
 });
 
-test("numeric polymorphic functions expose numeric signatures in editor metadata", () => {
+test("polymorphic functions expose constrained numeric signatures in editor metadata", () => {
   const checked = check(parse(`let square x = x ** 2
 
 let main =
@@ -699,7 +699,7 @@ let main =
   assert.equal(symbols.get("square")?.params?.[0]?.detail, "x : number");
 });
 
-test("numeric polymorphic functions execute correctly at int and float call sites", async () => {
+test("polymorphic functions execute correctly at int and float call sites", async () => {
   const result = await runOJaml(`let square x = x ** 2
 
 let main =
@@ -713,7 +713,7 @@ let main =
   assert.equal(result.output, "square 9 = 81\nsquare 2.5 = 6.25\n");
 });
 
-test("numeric specialization works for mixed arities and higher-order top-level functions", async () => {
+test("int/float specialization works for mixed arities and higher-order top-level functions", async () => {
   const result = await runOJaml(`let square x = x * x
 let apply f x = f x
 let affine a b = a * 2 + b

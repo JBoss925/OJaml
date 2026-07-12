@@ -10,7 +10,7 @@ This matrix tracks features currently implemented by the parser, checker, WASM b
 | Integers, floats, booleans, strings, unit | yes | Hello, Language Tour |
 | String escapes | yes | test suite |
 | Integer and float arithmetic, power, comparison, boolean, unary operators | yes | Language Tour |
-| Numeric-polymorphic functions and int/float specialization | yes | Type Inference |
+| Polymorphic functions and int/float specialization | yes | Type Inference |
 | Function application | yes | all nontrivial examples |
 | First-class functions | yes | Higher Order |
 | Closures with captured locals | yes | Higher Order |
@@ -36,4 +36,4 @@ This matrix tracks features currently implemented by the parser, checker, WASM b
 | Negative type diagnostics across primitives and stdlib calls | yes | test suite |
 | Exact editor-example output transcripts | yes | all examples |
 
-Not yet implemented: algebraic data type declarations, records, tuples, modules/import syntax, exceptions, pattern matching over list/array/map structure, garbage collection, and general runtime bounds checks.
+Not yet implemented: algebraic data type declarations, records, tuples, modules/import syntax, exceptions, pattern matching over list/array/set/map structure, garbage collection, and general runtime bounds checks.
