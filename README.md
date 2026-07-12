@@ -7,12 +7,12 @@ OJaml is an OCaml-inspired language implemented in TypeScript and compiled to We
 - Lexer and recursive-descent parser for an OCaml-like syntax.
 - Static checks for bindings, calls, branches, pattern matches, and standard-library usage.
 - Polymorphic type inference for functions and collection builtins.
-- First-class functions and closures with captured locals.
+- First-class functions and closures with captured locals and generated arity-specific indirect calls.
 - WebAssembly text backend using a uniform `i32` value representation plus concrete int/float specializations for polymorphic functions.
 - Browser editor/playground with Monaco completions, diagnostics, and hover metadata.
 - Node CLI for local compile/run workflows.
 - Reusable package exports for the editor component, examples, compiler, and runtime helpers.
-- Test suite covering parser, checker, runtime, stdlib, closures, tuples, sets, power, runtime access checks, exact editor-example transcripts, and compiler specialization regressions.
+- Test suite covering parser, checker, runtime, stdlib, closures, high-arity calls, tuples, sets, power, runtime access checks, exact editor-example transcripts, and compiler specialization regressions.
 
 ## Language Snapshot
 
@@ -32,7 +32,7 @@ Supported language features:
 
 - `let` and `let rec` top-level bindings
 - Local `let ... in ...`, local function bindings, and local `let rec` function bindings
-- Anonymous functions and first-class function values
+- Anonymous functions and first-class function values, including high-arity function values
 - Integers, floats, booleans, strings, unit, and tuples
 - Integer and float arithmetic, right-associative power `**`, comparison, equality, boolean, and integer `mod` operators
 - Polymorphic functions, including constrained numeric variables displayed as `number -> number` and emitted with concrete int/float call-site specializations
@@ -189,7 +189,7 @@ import "ojaml/styles.css";
 
 ## Runtime Model
 
-The WebAssembly backend uses a uniform `i32` representation. Integers and booleans are immediate values; unit is zero; heap-backed values such as floats, strings, tuples, arrays, lists, sets, maps, and closures are represented as pointers. Tuple blocks store their element count followed by one `i32` slot per element. Float arithmetic and power unbox operands to `f64`; `int ** int` returns an int, while any float operand makes `**` return a boxed float. Polymorphic top-level functions receive concrete int/float specializations when call sites require different runtime representations. The checker is responsible for rejecting invalid programs before emission.
+The WebAssembly backend uses a uniform `i32` representation. Integers and booleans are immediate values; unit is zero; heap-backed values such as floats, strings, tuples, arrays, lists, sets, maps, and closures are represented as pointers. Tuple blocks store their element count followed by one `i32` slot per element. Closure values store a table index plus captured values; indirect calls generate the WebAssembly function type needed for each arity used by the program instead of imposing a fixed source-level argument ceiling. Float arithmetic and power unbox operands to `f64`; `int ** int` returns an int, while any float operand makes `**` return a boxed float. Polymorphic top-level functions receive concrete int/float specializations when call sites require different runtime representations. The checker is responsible for rejecting invalid programs before emission.
 
 Runtime collection helpers trap invalid access: negative array lengths, out-of-bounds array reads/writes, empty-list head/tail, and missing `Map.get` keys do not silently read arbitrary memory. Current runtime limits are still intentional: allocation is bump-pointer based, there is no garbage collector, and traps are not yet recoverable language-level exceptions.
 

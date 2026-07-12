@@ -126,6 +126,53 @@ test("local let rec rejects non-function bindings", () => {
   assert.match(markers[0].message, /must bind a function/);
 });
 
+test("first-class functions support arities above three", async () => {
+  const result = await runOJaml(`let apply8 f =
+  f 1 2 3 4 5 6 7 8
+
+let main =
+  let sum8 a b c d e f g h =
+    a + b + c + d + e + f + g + h
+  in
+  apply8 sum8`);
+
+  assert.equal(result.value, 36);
+});
+
+test("returned closures support arities above three", async () => {
+  const result = await runOJaml(`let make_offset a b c =
+  fun d e f g h -> a + b + c + d + e + f + g + h
+
+let main =
+  let add_more = make_offset 1 2 3 in
+  add_more 4 5 6 7 8`);
+
+  assert.equal(result.value, 36);
+});
+
+test("local recursive closures support arities above three", async () => {
+  const result = await runOJaml(`let main =
+  let rec weighted a b c d =
+    match a with
+    | 0 -> b + c + d
+    | _ -> weighted (a - 1) (b + 1) (c + 2) (d + 3)
+  in
+  weighted 4 10 20 30`);
+
+  assert.equal(result.value, 84);
+});
+
+test("emits indirect function table types for the maximum program arity", () => {
+  const wat = compile(`let apply5 f = f 1 2 3 4 5
+
+let main =
+  let sum5 a b c d e = a + b + c + d + e in
+  apply5 sum5`).wat;
+
+  assert.match(wat, /\(type \$fn_5 \(func \(param i32 i32 i32 i32 i32 i32\) \(result i32\)\)/);
+  assert.doesNotMatch(wat, /\(type \$fn_6 /);
+});
+
 test("runs every arithmetic, comparison, boolean, and unary operator", async () => {
   const result = await runOJaml(`let main =
   let a = 20 / 5 in
@@ -974,6 +1021,7 @@ const expectedExampleResults: Map<string, { mainType: string; value: number; out
   ["tuples", { mainType: "int", value: 9, output: "point = (3, 4)\nx = 3\ny = 4\nx + y = 7\nlabeled = (origin, (3, 4))\npoints = [(3, 4), (0, 0)]\n" }],
   ["type-inference", { mainType: "int", value: 87, output: "square 9 = 81\nsquare 2.5 = 6.25\n" }],
   ["local-recursion", { mainType: "int", value: 15, output: "values = [4, 5, 6]\nsum = 15\n" }],
+  ["high-arity-functions", { mainType: "int", value: 112, output: "direct = 21\nthrough value = 21\nreturned closure = 70\n" }],
   ["pattern-matching", { mainType: "unit", value: 0, output: "many\none\none point five\nother\n3,4\nfirst Ada\n" }],
   ["factorial", { mainType: "int", value: 720, output: "720\n" }],
   ["fibonacci", { mainType: "int", value: 55, output: "55\n" }],

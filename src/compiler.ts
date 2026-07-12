@@ -64,10 +64,9 @@ export function emitWat(program: Program, checkedSymbols: CheckedSymbol[] = [], 
     ...topLevelWrapperNames.map((name) => `$__closure_${safe(name)}`),
     ...lambdaInfos.sort((left, right) => left.index - right.index).map((lambda) => `$__lambda_${lambda.id}`),
   ];
+  const functionTypes = emitFunctionTypes(maxIndirectArity(program, lambdaInfos));
   return `(module
-  (type $fn_1 (func (param i32 i32) (result i32)))
-  (type $fn_2 (func (param i32 i32 i32) (result i32)))
-  (type $fn_3 (func (param i32 i32 i32 i32) (result i32)))
+${indent(functionTypes, 2)}
   (import "env" "print_i32" (func $print_i32 (param i32)))
   (import "env" "print_f64" (func $print_f64 (param f64)))
   (import "env" "print_string" (func $print_string (param i32)))
@@ -381,7 +380,7 @@ function listTail(value: string): string {
 
 function emitIndirectCall(callee: Expr, args: Expr[], context: EmitContext): string {
   const arity = args.length;
-  if (arity < 1 || arity > 3) throw new Error(`Indirect calls with arity ${arity} are not implemented`);
+  if (arity < 1) throw new Error(`Indirect calls with arity ${arity} are not implemented`);
   const calleeLocal = context.nextCallLocal();
   return `(block (result i32)
   (local.set $${calleeLocal} ${emitExpr(callee, context)})
@@ -390,6 +389,23 @@ function emitIndirectCall(callee: Expr, args: Expr[], context: EmitContext): str
     ${args.map((arg) => emitExpr(arg, context)).join("\n    ")}
     (i32.load (local.get $${calleeLocal})))
 )`;
+}
+
+function emitFunctionTypes(maxArity: number): string {
+  const types: string[] = [];
+  for (let arity = 1; arity <= maxArity; arity++) {
+    types.push(`(type $fn_${arity} (func (param ${Array.from({ length: arity + 1 }, () => "i32").join(" ")}) (result i32)))`);
+  }
+  return types.join("\n");
+}
+
+function maxIndirectArity(program: Program, lambdas: LambdaInfo[]): number {
+  const arities = [
+    2,
+    ...program.declarations.filter((declaration) => declaration.params.length > 0).map((declaration) => declaration.params.length),
+    ...lambdas.map((lambda) => lambda.params.length),
+  ];
+  return Math.max(...arities);
 }
 
 function emitTopLevelClosure(name: string): string {

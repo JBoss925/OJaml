@@ -176,6 +176,26 @@ let main =
   total`,
   },
   {
+    id: "high-arity-functions",
+    title: "High-Arity Functions",
+    source: `let apply6 f =
+  f 1 2 3 4 5 6
+
+let make_offset a b c =
+  fun d e f g -> a + b + c + d + e + f + g
+
+let main =
+  let sum6 a b c d e f = a + b + c + d + e + f in
+  let direct = sum6 1 2 3 4 5 6 in
+  let through_value = apply6 sum6 in
+  let add_more = make_offset 10 20 30 in
+  let returned = add_more 1 2 3 4 in
+  let _ = println (String.concat "direct = " (to_string direct)) in
+  let _ = println (String.concat "through value = " (to_string through_value)) in
+  let _ = println (String.concat "returned closure = " (to_string returned)) in
+  direct + through_value + returned`,
+  },
+  {
     id: "pattern-matching",
     title: "Pattern Matching",
     source: `let describe_count n =
