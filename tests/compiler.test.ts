@@ -90,6 +90,42 @@ test("runs local let and conditionals through wasm", async () => {
   assert.equal(result.value, 20);
 });
 
+test("runs local function bindings and local let rec through wasm", async () => {
+  const result = await runOJaml(`let main =
+  let double x = x * 2 in
+  let rec sum xs =
+    match xs with
+    | [] -> 0
+    | head :: tail -> head + sum tail
+  in
+  let xs = List.cons 1 (List.cons 2 (List.cons 3 (List.empty ()))) in
+  double (sum xs)`);
+
+  assert.equal(result.value, 12);
+});
+
+test("local let rec closures capture outer locals and themselves", async () => {
+  const result = await runOJaml(`let main =
+  let scale = 3 in
+  let rec pow n =
+    match n with
+    | 0 -> 1
+    | _ -> scale * pow (n - 1)
+  in
+  pow 4`);
+
+  assert.equal(result.value, 81);
+});
+
+test("local let rec rejects non-function bindings", () => {
+  const markers = getOJamlSyntaxMarkers(`let main =
+  let rec x = 1 in
+  x`, 8);
+
+  assert.equal(markers.length, 1);
+  assert.match(markers[0].message, /must bind a function/);
+});
+
 test("runs every arithmetic, comparison, boolean, and unary operator", async () => {
   const result = await runOJaml(`let main =
   let a = 20 / 5 in
@@ -937,6 +973,7 @@ const expectedExampleResults: Map<string, { mainType: string; value: number; out
   ["sets", { mainType: "int", value: 2, output: "names = { Grace, Ada }\nhas Ada = true\n" }],
   ["tuples", { mainType: "int", value: 9, output: "point = (3, 4)\nx = 3\ny = 4\nx + y = 7\nlabeled = (origin, (3, 4))\npoints = [(3, 4), (0, 0)]\n" }],
   ["type-inference", { mainType: "int", value: 87, output: "square 9 = 81\nsquare 2.5 = 6.25\n" }],
+  ["local-recursion", { mainType: "int", value: 15, output: "values = [4, 5, 6]\nsum = 15\n" }],
   ["pattern-matching", { mainType: "unit", value: 0, output: "many\none\none point five\nother\n3,4\nfirst Ada\n" }],
   ["factorial", { mainType: "int", value: 720, output: "720\n" }],
   ["fibonacci", { mainType: "int", value: 55, output: "55\n" }],
@@ -1124,6 +1161,20 @@ test("checker exposes list pattern locals for hovers", () => {
 
   assert.equal(mainLocals.get("head"), "head : string");
   assert.equal(mainLocals.get("tail"), "tail : string list");
+});
+
+test("checker exposes local let rec function types for hovers", () => {
+  const checked = check(parse(`let main =
+  let rec countdown n =
+    match n with
+    | 0 -> 0
+    | _ -> countdown (n - 1)
+  in
+  countdown 3`));
+  const symbols = new Map(checked.symbols.map((symbol) => [symbol.name, symbol]));
+  const mainLocals = new Map(symbols.get("main")?.locals?.map((symbol) => [symbol.name, symbol.detail]));
+
+  assert.equal(mainLocals.get("countdown"), "countdown : int -> int");
 });
 
 test("checker exposes fst and snd instantiated tuple types for hovers", () => {

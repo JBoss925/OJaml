@@ -293,6 +293,18 @@ function checkExpr(expr: Expr, globals: Map<string, Binding>, locals: Map<string
       unify(checkExpr(expr.condition, globals, locals, context), boolType, expr.condition.span);
       return sameBranches(checkExpr(expr.thenBranch, globals, locals, context), checkExpr(expr.elseBranch, globals, locals, context), expr.span);
     case "LetIn": {
+      if (expr.recursive && expr.value.kind !== "Fun") {
+        throw new OJamlError("Local let rec must bind a function", expr.nameSpan.start, expr.nameSpan.end);
+      }
+      if (expr.recursive) {
+        const valueType = typeVar();
+        const nested = new Map(locals);
+        nested.set(expr.name, valueType);
+        const checkedValue = checkExpr(expr.value, globals, nested, context);
+        unify(valueType, checkedValue, expr.value.span);
+        context.tokens.push({ name: expr.name, kind: "function", type: valueType, span: expr.nameSpan });
+        return checkExpr(expr.body, globals, nested, context);
+      }
       const valueType = checkExpr(expr.value, globals, locals, context);
       context.tokens.push({ name: expr.name, kind: "value", type: valueType, span: expr.nameSpan });
       const nested = new Map(locals);
@@ -712,6 +724,16 @@ function collectLocalSymbolsInExpr(
 ): Type | undefined {
   switch (expr.kind) {
     case "LetIn": {
+      if (expr.recursive) {
+        const valueType = typeVar();
+        const nested = new Map(locals);
+        nested.set(expr.name, valueType);
+        const checkedValue = checkExpr(expr.value, globals, nested, { tokens: [] });
+        unify(valueType, checkedValue, expr.value.span);
+        symbols.push({ name: expr.name, detail: `${expr.name} : ${showType(valueType)}`, span: expr.nameSpan });
+        collectLocalSymbolsInExpr(expr.body, globals, nested, symbols);
+        return undefined;
+      }
       const valueType = checkExpr(expr.value, globals, locals, { tokens: [] });
       symbols.push({ name: expr.name, detail: `${expr.name} : ${showType(valueType)}`, span: expr.nameSpan });
       const nested = new Map(locals);

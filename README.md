@@ -31,7 +31,7 @@ let main =
 Supported language features:
 
 - `let` and `let rec` top-level bindings
-- Local `let ... in ...`
+- Local `let ... in ...`, local function bindings, and local `let rec` function bindings
 - Anonymous functions and first-class function values
 - Integers, floats, booleans, strings, unit, and tuples
 - Integer and float arithmetic, right-associative power `**`, comparison, equality, boolean, and integer `mod` operators

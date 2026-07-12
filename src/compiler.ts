@@ -176,6 +176,12 @@ function emitExpr(expr: Expr, context: EmitContext): string {
   (then ${emitExpr(expr.thenBranch, context)})
   (else ${emitExpr(expr.elseBranch, context)}))`;
     case "LetIn":
+      if (expr.recursive && expr.value.kind === "Fun") {
+        return `(block (result i32)
+  (local.set $${safe(expr.name)} ${emitClosure(expr.value, context, expr.name)})
+  ${emitExpr(expr.body, context)}
+)`;
+      }
       return `(block (result i32)
   (local.set $${safe(expr.name)} ${emitExpr(expr.value, context)})
   ${emitExpr(expr.body, context)}
@@ -396,13 +402,15 @@ function emitTopLevelClosure(name: string): string {
 )`;
 }
 
-function emitClosure(expr: Extract<Expr, { kind: "Fun" }>, context: EmitContext): string {
+function emitClosure(expr: Extract<Expr, { kind: "Fun" }>, context: EmitContext, selfName?: string): string {
   const captures = [...freeVars(expr.body, new Set(expr.params))].filter((name) => context.locals.has(name) || context.captured.has(name));
   const id = nextLambdaId++;
   const index = nextTableIndex++;
   lambdaInfos.push({ id, index, params: expr.params, body: expr.body, captures });
   const stores = captures.map((name, captureIndex) => {
-    const value = context.captured.has(name)
+    const value = name === selfName
+      ? `(local.get $__closure)`
+      : context.captured.has(name)
       ? `(i32.load (i32.add (local.get $__env) (i32.const ${4 + context.captured.get(name)! * 4})))`
       : `(local.get $${safe(name)})`;
     return `(i32.store (i32.add (local.get $__closure) (i32.const ${4 + captureIndex * 4})) ${value})`;
@@ -950,9 +958,9 @@ function freeVars(expr: Expr, bound: Set<string>): Set<string> {
       addAll(freeVars(expr.elseBranch, bound));
       break;
     case "LetIn": {
-      addAll(freeVars(expr.value, bound));
       const nested = new Set(bound);
       nested.add(expr.name);
+      addAll(freeVars(expr.value, expr.recursive ? nested : bound));
       addAll(freeVars(expr.body, nested));
       break;
     }

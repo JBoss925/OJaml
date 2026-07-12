@@ -67,14 +67,24 @@ class Parser {
   }
 
   private parseLetIn(start: number): Expr {
-    if (this.matchKeyword("rec")) throw new OJamlError("Local let rec is not implemented yet", this.previous().start, this.previous().end);
+    const recursive = this.matchKeyword("rec");
     const nameToken = this.expect("ident", "Expected local binding name");
     const name = nameToken.text;
+    const params: string[] = [];
+    const paramSpans = [];
+    while (this.at("ident")) {
+      const param = this.advance();
+      params.push(param.text);
+      paramSpans.push({ start: param.start, end: param.end });
+    }
     this.expect("equals", "Expected '=' in local let");
-    const value = this.parseExpr();
+    const parsedValue = this.parseExpr();
+    const value: Expr = params.length > 0
+      ? { kind: "Fun", params, paramSpans, body: parsedValue, span: { start: paramSpans[0].start, end: parsedValue.span.end } }
+      : parsedValue;
     this.expectKeyword("in");
     const body = this.parseExpr();
-    return { kind: "LetIn", name, nameSpan: { start: nameToken.start, end: nameToken.end }, value, body, span: { start, end: body.span.end } };
+    return { kind: "LetIn", recursive, name, nameSpan: { start: nameToken.start, end: nameToken.end }, value, body, span: { start, end: body.span.end } };
   }
 
   private parseFun(start: number): Expr {

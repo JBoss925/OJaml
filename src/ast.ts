@@ -29,7 +29,7 @@ export type Expr =
   | { kind: "Unary"; op: "-"; expr: Expr; span: SourceSpan }
   | { kind: "Binary"; op: BinaryOp; left: Expr; right: Expr; span: SourceSpan }
   | { kind: "If"; condition: Expr; thenBranch: Expr; elseBranch: Expr; span: SourceSpan }
-  | { kind: "LetIn"; name: string; nameSpan: SourceSpan; value: Expr; body: Expr; span: SourceSpan }
+  | { kind: "LetIn"; recursive: boolean; name: string; nameSpan: SourceSpan; value: Expr; body: Expr; span: SourceSpan }
   | { kind: "Call"; callee: Expr; args: Expr[]; span: SourceSpan }
   | { kind: "Fun"; params: string[]; paramSpans: SourceSpan[]; body: Expr; span: SourceSpan }
   | { kind: "Match"; expr: Expr; arms: MatchArm[]; span: SourceSpan };

@@ -161,6 +161,21 @@ let main =
   int_square + Float.to_int float_square`,
   },
   {
+    id: "local-recursion",
+    title: "Local Recursion",
+    source: `let main =
+  let rec sum xs =
+    match xs with
+    | [] -> 0
+    | head :: tail -> head + sum tail
+  in
+  let values = List.cons 4 (List.cons 5 (List.cons 6 (List.empty ()))) in
+  let total = sum values in
+  let _ = println (String.concat "values = " (to_string values)) in
+  let _ = println (String.concat "sum = " (to_string total)) in
+  total`,
+  },
+  {
     id: "pattern-matching",
     title: "Pattern Matching",
     source: `let describe_count n =

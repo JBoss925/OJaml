@@ -7,6 +7,7 @@ This matrix tracks features currently implemented by the parser, checker, WASM b
 | Comments and `;;` separators | yes | Language Tour |
 | Top-level `let` and `let rec` | yes | Factorial, Fibonacci |
 | Local `let ... in ...` | yes | Basics, Language Tour |
+| Local function bindings and local `let rec` functions | yes | Local Recursion |
 | Integers, floats, booleans, strings, unit | yes | Hello, Language Tour |
 | Tuple expressions | yes | Tuples |
 | Pair projection with `fst` and `snd` | yes | Tuples |
