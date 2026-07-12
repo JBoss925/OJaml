@@ -374,6 +374,13 @@ function emitPatternTest(pattern: Pattern, value: string, context: EmitContext):
       const arityTest = `(i32.eq (i32.load ${value}) (i32.const ${fields.length}))`;
       return fields.reduce((test, field, index) => `(i32.and ${test} ${emitPatternTest(field.pattern, recordField(value, index), context)})`, arityTest);
     }
+    case "PArray": {
+      const lengthTest = `(i32.and (i32.ne ${value} (i32.const 0)) (i32.eq (i32.load ${value}) (i32.const ${pattern.items.length})))`;
+      return pattern.items.reduce((test, item, index) => {
+        const itemValue = arrayItem(value, index);
+        return `(i32.and ${test} ${emitPatternTest(item, itemValue, context)})`;
+      }, lengthTest);
+    }
     case "PListNil":
       return `(i32.eqz ${value})`;
     case "PListCons":
@@ -395,6 +402,12 @@ function emitPatternBindings(pattern: Pattern, value: string): string {
       .filter(Boolean)
       .join("\n  ");
   }
+  if (pattern.kind === "PArray") {
+    return pattern.items
+      .map((item, index) => emitPatternBindings(item, arrayItem(value, index)))
+      .filter(Boolean)
+      .join("\n  ");
+  }
   if (pattern.kind === "PListCons") {
     return [
       emitPatternBindings(pattern.head, listHead(value)),
@@ -409,6 +422,10 @@ function tupleItem(value: string, index: number): string {
 }
 
 function recordField(value: string, index: number): string {
+  return `(i32.load (i32.add ${value} (i32.const ${4 + index * 4})))`;
+}
+
+function arrayItem(value: string, index: number): string {
   return `(i32.load (i32.add ${value} (i32.const ${4 + index * 4})))`;
 }
 
@@ -1121,6 +1138,7 @@ function addPatternLocals(pattern: Pattern, locals: Set<string>): void {
   }
   if (pattern.kind === "PTuple") pattern.items.forEach((item) => addPatternLocals(item, locals));
   if (pattern.kind === "PRecord") pattern.fields.forEach((field) => addPatternLocals(field.pattern, locals));
+  if (pattern.kind === "PArray") pattern.items.forEach((item) => addPatternLocals(item, locals));
   if (pattern.kind === "PListCons") {
     addPatternLocals(pattern.head, locals);
     addPatternLocals(pattern.tail, locals);
@@ -1134,6 +1152,7 @@ function addPatternBoundNames(pattern: Pattern, bound: Set<string>): void {
   }
   if (pattern.kind === "PTuple") pattern.items.forEach((item) => addPatternBoundNames(item, bound));
   if (pattern.kind === "PRecord") pattern.fields.forEach((field) => addPatternBoundNames(field.pattern, bound));
+  if (pattern.kind === "PArray") pattern.items.forEach((item) => addPatternBoundNames(item, bound));
   if (pattern.kind === "PListCons") {
     addPatternBoundNames(pattern.head, bound);
     addPatternBoundNames(pattern.tail, bound);

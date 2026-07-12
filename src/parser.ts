@@ -157,6 +157,21 @@ class Parser {
       return { kind: "PRecord", fields, span: { start: token.start, end: this.previous().end } };
     }
     if (this.match("lbracket")) {
+      if (this.match("operator", "||")) {
+        this.expect("rbracket", "Expected ']' in empty array pattern");
+        return { kind: "PArray", items: [], span: { start: token.start, end: this.previous().end } };
+      }
+      if (this.match("pipe")) {
+        const items: Pattern[] = [];
+        if (!this.at("pipe")) {
+          do {
+            items.push(this.parsePattern());
+          } while (this.match("semicolon"));
+        }
+        this.expect("pipe", "Expected '|]' in array pattern");
+        this.expect("rbracket", "Expected '|]' in array pattern");
+        return { kind: "PArray", items, span: { start: token.start, end: this.previous().end } };
+      }
       this.expect("rbracket", "Expected ']' in empty list pattern");
       return { kind: "PListNil", span: { start: token.start, end: this.previous().end } };
     }

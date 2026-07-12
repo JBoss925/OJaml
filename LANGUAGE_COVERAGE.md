@@ -21,7 +21,7 @@ This matrix tracks features currently implemented by the parser, checker, WASM b
 | Top-level functions passed as values | yes | test suite |
 | `if ... then ... else ...` | yes | Basics |
 | `match ... with` | yes | Factorial, Language Tour |
-| Int/float/string/bool/unit/tuple/record/list/wildcard/variable patterns | yes | Pattern Matching, Records |
+| Int/float/string/bool/unit/tuple/record/list/array/wildcard/variable patterns | yes | Pattern Matching, Records, Arrays |
 | `print : int|float|string -> unit` | yes | test suite |
 | `println : int|float|string -> unit` | yes | examples |
 | `to_string : 'a -> string` | yes | examples |
@@ -41,4 +41,4 @@ This matrix tracks features currently implemented by the parser, checker, WASM b
 | Negative type diagnostics across primitives and stdlib calls | yes | test suite |
 | Exact editor-example output transcripts | yes | all examples |
 
-Not yet implemented: algebraic data type declarations, nominal record type declarations, modules/import syntax, exceptions, pattern matching over array/set/map structure, garbage collection, and recoverable language-level runtime exceptions.
+Not yet implemented: algebraic data type declarations, nominal record type declarations, modules/import syntax, exceptions, pattern matching over set/map structure, garbage collection, and recoverable language-level runtime exceptions.

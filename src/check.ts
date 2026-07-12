@@ -564,6 +564,14 @@ function checkPattern(pattern: Pattern, scrutinee: Type, locals: Map<string, Typ
       });
       return exhaustiveFields.every(Boolean);
     }
+    case "PArray": {
+      const elem = typeVar();
+      const arrayType = app("array", [elem]);
+      unify(scrutinee, arrayType, pattern.span);
+      context.tokens.push({ name: "[| |]", kind: "literal", type: arrayType, span: pattern.span });
+      pattern.items.forEach((item) => checkPattern(item, elem, locals, context));
+      return false;
+    }
     case "PListNil": {
       const elem = typeVar();
       unify(scrutinee, app("list", [elem]), pattern.span);
@@ -881,6 +889,11 @@ function collectPatternSymbols(
       const fieldType = fields.find((item) => item.name === field.name)?.type ?? typeVar();
       collectPatternSymbols(field.pattern, fieldType, locals, symbols);
     });
+    return;
+  }
+  if (pattern.kind === "PArray") {
+    const elem = pruned.kind === "app" && pruned.name === "array" ? pruned.args[0] : typeVar();
+    pattern.items.forEach((item) => collectPatternSymbols(item, elem, locals, symbols));
     return;
   }
   if (pattern.kind === "PListCons") {

@@ -77,9 +77,15 @@ export const ojamlExamples: OJamlExample[] = [
   let _ = Array.set scores 0 10 in
   let _ = Array.set scores 1 20 in
   let _ = Array.set scores 2 30 in
+  let total =
+    match scores with
+    | [| first; second; third |] -> first + second + third
+    | _ -> 0
+  in
   let _ = println (String.concat "scores = " (to_string scores)) in
   let _ = println (String.concat "length = " (to_string (Array.length scores))) in
-  Array.get scores 0 + Array.get scores 1 + Array.get scores 2`,
+  let _ = println (String.concat "total = " (to_string total)) in
+  total`,
   },
   {
     id: "lists",

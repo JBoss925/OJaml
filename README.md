@@ -38,7 +38,7 @@ Supported language features:
 - Polymorphic functions, including constrained numeric variables displayed as `number -> number` and emitted with concrete int/float call-site specializations
 - `if ... then ... else`
 - OCaml-style `match ... with | pat -> expr`
-- Wildcard, int, float, string, bool, unit, tuple, record, list, and variable patterns
+- Wildcard, int, float, string, bool, unit, tuple, record, list, fixed-length array, and variable patterns
 - Zero-based tuple projection with `.0`, `.1`, ... plus pair helpers `fst` and `snd`
 - Polymorphic arrays, lists, sets, maps, tuples and records in heap-backed values, and higher-order collection functions
 - `print : int|float|string -> unit`
@@ -99,7 +99,7 @@ Tuple projection uses zero-based postfix indexes: `point.0`, `point.1`, and so o
 
 Structural record values use `{ field = value; other = value }` syntax and field access uses `record.field`. Field layout is sorted by label at compile time, so source field order does not affect access, matching, or formatting. Nominal record type declarations are still future work.
 
-Pattern matching supports primitive literals, unit, wildcard/variable catch-alls, tuple structure, record structure, and list structure with `[]` and `head :: tail`. Tuple, record, and list patterns may bind nested values, mix literals with binders, and participate in the same conservative exhaustiveness rule as other patterns. Structural patterns for arrays, sets, and maps are intentionally still future work.
+Pattern matching supports primitive literals, unit, wildcard/variable catch-alls, tuple structure, record structure, list structure with `[]` and `head :: tail`, and fixed-length array structure with `[| ... |]`. Tuple, record, list, and array patterns may bind nested values and mix literals with binders. Array patterns match exact lengths, while list empty/cons coverage and catch-all patterns remain the conservative route for exhaustive matches. Structural patterns for sets and maps are intentionally still future work.
 
 ## Prerequisites
 

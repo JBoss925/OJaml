@@ -96,6 +96,23 @@ test("parses empty and cons list patterns as right-associative patterns", () => 
   assert.equal(match.arms[1].pattern.tail.kind, "PListCons");
 });
 
+test("parses fixed-length array patterns", () => {
+  const ast = parse(`let main =
+  let values = Array.make 2 0 in
+  match values with
+  | [| first; 2 |] -> first
+  | [||] -> 0
+  | _ -> -1`);
+  const match = ast.declarations[0].value;
+
+  assert.equal(match.kind, "LetIn");
+  assert.equal(match.body.kind, "Match");
+  assert.equal(match.body.arms[0].pattern.kind, "PArray");
+  assert.equal(match.body.arms[0].pattern.items.length, 2);
+  assert.equal(match.body.arms[1].pattern.kind, "PArray");
+  assert.equal(match.body.arms[1].pattern.items.length, 0);
+});
+
 test("emits wasm text for scalar program", () => {
   const { wat } = compile(`let main = 40 + 2`);
   assert.match(wat, /export "main"/);
@@ -1118,6 +1135,73 @@ test("list patterns keep conservative exhaustiveness", () => {
   assert.match(nonExhaustiveConsOnly[0].message, /catch-all/);
 });
 
+test("array patterns match fixed lengths and nested element patterns", async () => {
+  const result = await runOJaml(`let describe values =
+  match values with
+  | [||] -> "empty"
+  | [| (name, { name = _; year = 1815 }); (_, { name = _; year = y }) |] ->
+      String.concat name (String.concat " then " (to_string y))
+  | [| _ |] -> "one"
+  | _ -> "other"
+
+let main =
+  let ada = { name = "Ada"; year = 1815 } in
+  let grace = { name = "Grace"; year = 1906 } in
+  let values = Array.make 2 ("", ada) in
+  let _ = Array.set values 0 (ada.name, ada) in
+  let _ = Array.set values 1 (grace.name, grace) in
+  let _ = println (describe (Array.make 0 ("", ada))) in
+  let _ = println (describe values) in
+  String.length (describe values)`);
+
+  assert.equal(result.value, 13);
+  assert.equal(result.output, "empty\nAda then 1906\n");
+});
+
+test("array pattern bindings work inside closures", async () => {
+  const result = await runOJaml(`let main =
+  let offset = 10 in
+  let score values =
+    match values with
+    | [| first; second; third |] -> first + second + third + offset
+    | _ -> 0
+  in
+  let values = Array.make 3 0 in
+  let _ = Array.set values 0 4 in
+  let _ = Array.set values 1 5 in
+  let _ = Array.set values 2 6 in
+  score values`);
+
+  assert.equal(result.value, 25);
+});
+
+test("array patterns reject element and scrutinee mismatches", () => {
+  const cases = [
+    `let main = match Array.make 2 1 with | [| "one"; x |] -> x | _ -> 0`,
+    `let main = match 1 with | [||] -> 0 | _ -> 1`,
+    `let main = match Array.make 1 "x" with | [| head |] -> head + 1 | _ -> 0`,
+  ];
+
+  for (const source of cases) {
+    const markers = getOJamlSyntaxMarkers(source, 8);
+    assert.equal(markers.length, 1, source);
+    assert.match(markers[0].message, /Type mismatch|Operator expects/, source);
+  }
+});
+
+test("array patterns keep conservative exhaustiveness", () => {
+  const exhaustive = getOJamlSyntaxMarkers(`let main =
+  match Array.make 1 0 with
+  | _ -> 0`, 8);
+  const nonExhaustive = getOJamlSyntaxMarkers(`let main =
+  match Array.make 1 0 with
+  | [| x |] -> x`, 8);
+
+  assert.equal(exhaustive.length, 0);
+  assert.equal(nonExhaustive.length, 1);
+  assert.match(nonExhaustive[0].message, /catch-all/);
+});
+
 test("main cannot return tuples directly", () => {
   const markers = getOJamlSyntaxMarkers(`let main = (1, 2)`, 8);
   const recordMarkers = getOJamlSyntaxMarkers(`let main = { name = "Ada" }`, 8);
@@ -1128,7 +1212,7 @@ test("main cannot return tuples directly", () => {
   assert.match(recordMarkers[0].message, /cannot return \{ name: string \} directly/);
 });
 
-test("match supports int, float, string, bool, unit, tuple, record, list, wildcard, and variable patterns", async () => {
+test("match supports int, float, string, bool, unit, tuple, record, list, array, wildcard, and variable patterns", async () => {
   const result = await runOJaml(`let classify n =
   match n with
   | 0 -> "zero"
@@ -1142,10 +1226,11 @@ let main =
   let e = match (2, 3) with | (x, y) -> x + y in
   let f = match List.cons 5 (List.empty ()) with | head :: [] -> head | _ -> 0 in
   let g = match { name = "Ada"; year = 1815 } with | { year = y; name = "Ada" } -> y | _ -> 0 in
+  let h = match Array.make 2 3 with | [| x; y |] -> x + y | _ -> 0 in
   let _ = print (classify 7) in
-  a + b + c + d + e + f + g`);
+  a + b + c + d + e + f + g + h`);
 
-  assert.equal(result.value, 1835);
+  assert.equal(result.value, 1841);
   assert.deepEqual(result.prints, ["nonzero"]);
 });
 
@@ -1155,7 +1240,7 @@ const expectedExampleResults: Map<string, { mainType: string; value: number; out
   ["integer-operators", { mainType: "int", value: 30, output: "10 + 4 = 14\nsum - 3 = 11\ndifference * 2 = 22\nproduct / 5 = 4\nproduct mod 5 = 2\n2 ** 3 = 8\n" }],
   ["float-operators", { mainType: "float", value: 14, output: "7.5 + 2.5 = 10\na - 1 = 9\nb * 2.0 = 18\nc / 3 = 6\n2.0 ** 3 = 8\n" }],
   ["strings", { mainType: "int", value: 11, output: "greeting = hello world\nwords = [hello, world]\nlength = 11\n" }],
-  ["arrays", { mainType: "int", value: 60, output: "scores = [10, 20, 30]\nlength = 3\n" }],
+  ["arrays", { mainType: "int", value: 60, output: "scores = [10, 20, 30]\nlength = 3\ntotal = 60\n" }],
   ["lists", { mainType: "int", value: 3, output: "items = [first, second, third]\nfirst = first\nrest = [second, third]\nlength = 3\n" }],
   ["maps", { mainType: "int", value: 1906, output: "years = { Grace: 1906, Ada: 1815 }\nAda = 1815\nGrace = found\n" }],
   ["sets", { mainType: "int", value: 2, output: "names = { Grace, Ada }\nhas Ada = true\n" }],
@@ -1370,6 +1455,20 @@ test("checker exposes list pattern locals for hovers", () => {
 
   assert.equal(mainLocals.get("head"), "head : string");
   assert.equal(mainLocals.get("tail"), "tail : string list");
+});
+
+test("checker exposes array pattern locals for hovers", () => {
+  const source = `let main =
+  let values = Array.make 2 "Ada" in
+  match values with
+  | [| first; second |] -> String.length first + String.length second
+  | _ -> 0`;
+  const checked = check(parse(source));
+  const symbols = new Map(checked.symbols.map((symbol) => [symbol.name, symbol]));
+  const mainLocals = new Map(symbols.get("main")?.locals?.map((symbol) => [symbol.name, symbol.detail]));
+
+  assert.equal(mainLocals.get("first"), "first : string");
+  assert.equal(mainLocals.get("second"), "second : string");
 });
 
 test("checker exposes local let rec function types for hovers", () => {
