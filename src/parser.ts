@@ -108,6 +108,7 @@ class Parser {
   private parsePattern(): Pattern {
     const token = this.peek();
     if (this.match("int")) return { kind: "PInt", value: Number(token.text), span: { start: token.start, end: token.end } };
+    if (this.match("float")) return { kind: "PFloat", value: Number(token.text), span: { start: token.start, end: token.end } };
     if (this.match("string")) return { kind: "PString", value: token.text, span: { start: token.start, end: token.end } };
     if (this.matchKeyword("true")) return { kind: "PBool", value: true, span: { start: token.start, end: token.end } };
     if (this.matchKeyword("false")) return { kind: "PBool", value: false, span: { start: token.start, end: token.end } };
@@ -156,6 +157,7 @@ class Parser {
   private parseAtom(): Expr {
     const token = this.peek();
     if (this.match("int")) return { kind: "Int", value: Number(token.text), span: { start: token.start, end: token.end } };
+    if (this.match("float")) return { kind: "Float", value: Number(token.text), span: { start: token.start, end: token.end } };
     if (this.match("string")) return { kind: "String", value: token.text, span: { start: token.start, end: token.end } };
     if (this.matchKeyword("true")) return { kind: "Bool", value: true, span: { start: token.start, end: token.end } };
     if (this.matchKeyword("false")) return { kind: "Bool", value: false, span: { start: token.start, end: token.end } };
@@ -186,7 +188,7 @@ class Parser {
 
   private canStartAtom(): boolean {
     const token = this.peek();
-    if (token.kind === "int" || token.kind === "string" || token.kind === "ident" || token.kind === "lparen") return true;
+    if (token.kind === "int" || token.kind === "float" || token.kind === "string" || token.kind === "ident" || token.kind === "lparen") return true;
     if (token.kind === "keyword" && ["true", "false"].includes(token.text)) return true;
     if (token.kind === "keyword" && expressionTerminators.has(token.text)) return false;
     return false;

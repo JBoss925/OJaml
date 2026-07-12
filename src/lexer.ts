@@ -2,6 +2,7 @@ import { OJamlError } from "./errors";
 
 export type TokenKind =
   | "int"
+  | "float"
   | "string"
   | "ident"
   | "keyword"
@@ -45,7 +46,13 @@ export function lex(source: string): Token[] {
     if (/[0-9]/.test(ch)) {
       i++;
       while (/[0-9]/.test(source[i] ?? "")) i++;
-      tokens.push({ kind: "int", text: source.slice(start, i), start, end: i });
+      if (source[i] === "." && /[0-9]/.test(source[i + 1] ?? "")) {
+        i++;
+        while (/[0-9]/.test(source[i] ?? "")) i++;
+        tokens.push({ kind: "float", text: source.slice(start, i), start, end: i });
+      } else {
+        tokens.push({ kind: "int", text: source.slice(start, i), start, end: i });
+      }
       continue;
     }
 

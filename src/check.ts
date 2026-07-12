@@ -1,12 +1,12 @@
 import type { Declaration, Expr, Pattern, Program, SourceSpan } from "./ast";
 import { OJamlError } from "./errors";
 
-export type OJamlType = "int" | "bool" | "string" | "unit" | "array" | "list" | "map" | "fn";
-export type RuntimeMainType = "int" | "bool" | "unit";
+export type OJamlType = "int" | "float" | "bool" | "string" | "unit" | "array" | "list" | "map" | "fn";
+export type RuntimeMainType = "int" | "float" | "bool" | "unit";
 
 type Type =
   | { kind: "prim"; name: Exclude<OJamlType, "array" | "list" | "map" | "fn"> }
-  | { kind: "var"; id: number; instance?: Type }
+  | { kind: "var"; id: number; instance?: Type; numeric?: boolean }
   | { kind: "app"; name: "array" | "list"; args: [Type] }
   | { kind: "app"; name: "map"; args: [Type, Type] }
   | { kind: "fn"; params: Type[]; result: Type };
@@ -62,6 +62,7 @@ type CheckContext = {
 let nextTypeVar = 0;
 
 const intType = prim("int");
+const floatType = prim("float");
 const boolType = prim("bool");
 const stringType = prim("string");
 const unitType = prim("unit");
@@ -101,7 +102,14 @@ function builtins(): Map<string, Binding> {
 }
 
 const stdlibSignatures: BuiltinSignature[] = [
-  builtin("print", "print : int|string -> unit", () => fn([typeVar()], unitType), "Prints an integer or string and returns unit."),
+  builtin("print", "print : int|float|string -> unit", () => fn([typeVar()], unitType), "Prints an integer, float, or string and returns unit."),
+  builtin("println", "println : int|float|string -> unit", () => fn([typeVar()], unitType), "Prints an integer, float, or string followed by a newline and returns unit."),
+  builtin("Float.of_int", "Float.of_int : int -> float", () => fn([intType], floatType)),
+  builtin("Float.to_int", "Float.to_int : float -> int", () => fn([floatType], intType)),
+  builtin("to_string", "to_string : 'a -> string", () => fn([typeVar()], stringType), "Converts any OJaml value into a printable string."),
+  builtin("String.concat", "String.concat : string -> string -> string", () => fn([stringType, stringType], stringType)),
+  builtin("String.length", "String.length : string -> int", () => fn([stringType], intType)),
+  builtin("String.split", "String.split : string -> string -> string list", () => fn([stringType, stringType], app("list", [stringType]))),
   builtin("Array.make", "Array.make : int -> 'a -> 'a array", () => {
     const a = typeVar();
     return fn([intType, a], app("array", [a]));
@@ -220,6 +228,9 @@ function checkExpr(expr: Expr, globals: Map<string, Binding>, locals: Map<string
     case "Int":
       context.tokens.push({ name: String(expr.value), kind: "literal", type: intType, span: expr.span });
       return intType;
+    case "Float":
+      context.tokens.push({ name: String(expr.value), kind: "literal", type: floatType, span: expr.span });
+      return floatType;
     case "String":
       context.tokens.push({ name: "string literal", kind: "literal", type: stringType, span: expr.span });
       return stringType;
@@ -249,8 +260,7 @@ function checkExpr(expr: Expr, globals: Map<string, Binding>, locals: Map<string
       return type;
     }
     case "Unary":
-      unify(checkExpr(expr.expr, globals, locals, context), intType, expr.span);
-      return intType;
+      return requireNumeric(checkExpr(expr.expr, globals, locals, context), expr.span);
     case "Binary":
       return checkBinary(expr, globals, locals, context);
     case "If":
@@ -267,19 +277,19 @@ function checkExpr(expr: Expr, globals: Map<string, Binding>, locals: Map<string
       if (expr.callee.kind === "Var") {
         const binding = globals.get(expr.callee.name);
         const targetType = resolveVarType(expr.callee, globals, locals);
-        if (expr.callee.name === "print") {
+        if (expr.callee.name === "print" || expr.callee.name === "println") {
           if (expr.args.length !== 1) {
             throw new OJamlError(`Function expects 1 argument(s), got ${expr.args.length}`, expr.span.start, expr.span.end);
           }
           const argType = checkExpr(expr.args[0], globals, locals, context);
           const arg = prune(argType);
-          if (arg.kind !== "var" && !(arg.kind === "prim" && (arg.name === "int" || arg.name === "string"))) {
-            throw new OJamlError(`print expects int or string; got ${showType(arg)}`, expr.args[0].span.start, expr.args[0].span.end);
+          if (arg.kind !== "var" && !(arg.kind === "prim" && (arg.name === "int" || arg.name === "float" || arg.name === "string"))) {
+            throw new OJamlError(`${expr.callee.name} expects int, float, or string; got ${showType(arg)}`, expr.args[0].span.start, expr.args[0].span.end);
           }
           context.tokens.push({
             name: expr.callee.name,
             kind: "builtin",
-            detail: arg.kind === "var" ? "print : int|string -> unit" : `print : ${showType(arg)} -> unit`,
+            detail: arg.kind === "var" ? `${expr.callee.name} : int|float|string -> unit` : `${expr.callee.name} : ${showType(arg)} -> unit`,
             span: expr.callee.span,
             documentation: binding?.documentation,
           });
@@ -355,13 +365,67 @@ function checkBinary(expr: Extract<Expr, { kind: "Binary" }>, globals: Map<strin
     unify(checkExpr(expr.right, globals, locals, context), boolType, expr.right.span);
     return boolType;
   }
+  const leftType = checkExpr(expr.left, globals, locals, context);
+  const rightType = checkExpr(expr.right, globals, locals, context);
   if (expr.op === "=" || expr.op === "<>") {
-    unify(checkExpr(expr.left, globals, locals, context), checkExpr(expr.right, globals, locals, context), expr.span);
+    if (!allowNumericPair(leftType, rightType)) unify(leftType, rightType, expr.span);
     return boolType;
   }
-  unify(checkExpr(expr.left, globals, locals, context), intType, expr.left.span);
-  unify(checkExpr(expr.right, globals, locals, context), intType, expr.right.span);
-  return ["<", "<=", ">", ">="].includes(expr.op) ? boolType : intType;
+  if (expr.op === "mod") {
+    unify(leftType, intType, expr.left.span);
+    unify(rightType, intType, expr.right.span);
+    return intType;
+  }
+  const result = numericResultType(leftType, rightType, expr.span);
+  return ["<", "<=", ">", ">="].includes(expr.op) ? boolType : result;
+}
+
+function allowNumericPair(left: Type, right: Type): boolean {
+  const leftPruned = prune(left);
+  const rightPruned = prune(right);
+  return (isConcreteInt(leftPruned) && isConcreteFloat(rightPruned))
+    || (isConcreteFloat(leftPruned) && isConcreteInt(rightPruned));
+}
+
+function numericResultType(leftRaw: Type, rightRaw: Type, span: SourceSpan): Type {
+  const left = requireNumeric(leftRaw, span);
+  const right = requireNumeric(rightRaw, span);
+  if (isConcreteFloat(left) || isConcreteFloat(right)) return floatType;
+  if (isConcreteInt(left) && isConcreteInt(right)) return intType;
+  if (left.kind === "var" && right.kind === "var") {
+    unify(left, right, span);
+    const unified = prune(left);
+    if (unified.kind === "var") unified.numeric = true;
+    return unified;
+  }
+  if (left.kind === "var") return left;
+  if (right.kind === "var") return right;
+  return intType;
+}
+
+function requireNumeric(type: Type, span: SourceSpan): Type {
+  const pruned = prune(type);
+  if (pruned.kind === "var") {
+    pruned.numeric = true;
+    return pruned;
+  }
+  if (pruned.kind === "prim" && (pruned.name === "int" || pruned.name === "float")) return pruned;
+  throw new OJamlError(`Operator expects int or float; got ${showType(pruned)}`, span.start, span.end);
+}
+
+function isNumericLike(type: Type): boolean {
+  const pruned = prune(type);
+  return (pruned.kind === "var" && pruned.numeric === true) || isConcreteInt(pruned) || isConcreteFloat(pruned);
+}
+
+function isConcreteInt(type: Type): boolean {
+  const pruned = prune(type);
+  return pruned.kind === "prim" && pruned.name === "int";
+}
+
+function isConcreteFloat(type: Type): boolean {
+  const pruned = prune(type);
+  return pruned.kind === "prim" && pruned.name === "float";
 }
 
 function checkPattern(pattern: Pattern, scrutinee: Type, locals: Map<string, Type>, context: CheckContext): boolean {
@@ -369,6 +433,10 @@ function checkPattern(pattern: Pattern, scrutinee: Type, locals: Map<string, Typ
     case "PInt":
       unify(scrutinee, intType, pattern.span);
       context.tokens.push({ name: String(pattern.value), kind: "literal", type: intType, span: pattern.span });
+      return false;
+    case "PFloat":
+      unify(scrutinee, floatType, pattern.span);
+      context.tokens.push({ name: String(pattern.value), kind: "literal", type: floatType, span: pattern.span });
       return false;
     case "PString":
       unify(scrutinee, stringType, pattern.span);
@@ -429,6 +497,10 @@ function unify(leftRaw: Type, rightRaw: Type, span: SourceSpan): void {
   const right = prune(rightRaw);
   if (left === right) return;
   if (left.kind === "var") {
+    if (left.numeric && right.kind !== "var" && !(right.kind === "prim" && (right.name === "int" || right.name === "float"))) {
+      throw typeMismatch(left, right, span);
+    }
+    if (left.numeric && right.kind === "var") right.numeric = true;
     if (occurs(left, right)) throw new OJamlError(`Recursive type ${showType(left)} occurs in ${showType(right)}`, span.start, span.end);
     left.instance = right;
     return;
@@ -483,13 +555,16 @@ function occurs(variable: Type, type: Type): boolean {
 
 function isRuntimeMainType(type: Type): type is { kind: "prim"; name: RuntimeMainType } {
   const pruned = prune(type);
-  return pruned.kind === "prim" && (pruned.name === "int" || pruned.name === "bool" || pruned.name === "unit");
+  return pruned.kind === "prim" && (pruned.name === "int" || pruned.name === "float" || pruned.name === "bool" || pruned.name === "unit");
 }
 
 function showType(type: Type): string {
   const pruned = prune(type);
   if (pruned.kind === "prim") return pruned.name;
-  if (pruned.kind === "var") return `'${String.fromCharCode(97 + (pruned.id % 26))}${pruned.id >= 26 ? Math.floor(pruned.id / 26) : ""}`;
+  if (pruned.kind === "var") {
+    if (pruned.numeric) return "number";
+    return `'${String.fromCharCode(97 + (pruned.id % 26))}${pruned.id >= 26 ? Math.floor(pruned.id / 26) : ""}`;
+  }
   if (pruned.kind === "fn") return `${pruned.params.map(showType).join(" -> ")} -> ${showType(pruned.result)}`;
   if (pruned.name === "map") return `(${showType(pruned.args[0])}, ${showType(pruned.args[1])}) map`;
   return `${showType(pruned.args[0])} ${pruned.name}`;

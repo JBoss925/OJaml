@@ -3,6 +3,7 @@ import test from "node:test";
 import { check } from "../src/check";
 import { compile } from "../src/compiler";
 import { getOJamlHoverInfo, getOJamlSyntaxMarkers } from "../src/monacoOJaml";
+import { ojamlExamples } from "../src/ojamlExamples";
 import { parse } from "../src/parser";
 import { runOJaml } from "../src/runtime";
 
@@ -58,6 +59,50 @@ test("runs every arithmetic, comparison, boolean, and unary operator", async () 
   assert.equal(result.value, 27);
 });
 
+test("numeric operators cover int, float, and mixed operand combinations", async () => {
+  const result = await runOJaml(`let main =
+  let int_ops = (8 + 2) + (8 - 2) + (8 * 2) + (8 / 2) + (8 mod 3) in
+  let float_float = (8.0 + 2.0) + (8.0 - 2.0) + (8.0 * 2.0) + (8.0 / 2.0) in
+  let int_float = (8 + 2.0) + (8 - 2.0) + (8 * 2.0) + (8 / 2.0) in
+  let float_int = (8.0 + 2) + (8.0 - 2) + (8.0 * 2) + (8.0 / 2) in
+  int_ops + Float.to_int float_float + Float.to_int int_float + Float.to_int float_int`);
+
+  assert.equal(result.value, 146);
+});
+
+test("numeric comparisons cover int, float, mixed equality, and mixed ordering", async () => {
+  const result = await runOJaml(`let score ok value = if ok then value else 0
+
+let main =
+  score (4 = 4) 1 +
+  score (4 <> 5) 2 +
+  score (3 < 4) 4 +
+  score (3 <= 3) 8 +
+  score (5 > 4) 16 +
+  score (5 >= 5) 32 +
+  score (4.0 = 4.0) 64 +
+  score (4.0 <> 5.0) 128 +
+  score (3.0 < 4.0) 256 +
+  score (3.0 <= 3.0) 512 +
+  score (5.0 > 4.0) 1024 +
+  score (5.0 >= 5.0) 2048 +
+  score (4 = 4.0) 4096 +
+  score (4.0 = 4) 8192 +
+  score (3 < 4.0) 16384 +
+  score (5.0 >= 5) 32768`);
+
+  assert.equal(result.value, 65535);
+});
+
+test("unary minus works for ints and floats", async () => {
+  const result = await runOJaml(`let main =
+  let int_value = -3 in
+  let float_value = -2.5 in
+  if int_value < 0 && float_value < 0.0 then Float.to_int (float_value * -2.0) + (0 - int_value) else 0`);
+
+  assert.equal(result.value, 8);
+});
+
 test("main can return bool", async () => {
   const result = await runOJaml(`let main = 3 < 4`);
 
@@ -73,6 +118,7 @@ test("print returns unit and records output", async () => {
 
   assert.equal(result.value, 18);
   assert.deepEqual(result.prints, [7, 11]);
+  assert.equal(result.output, "711");
 });
 
 test("unit can be the main result", async () => {
@@ -90,13 +136,128 @@ test("prints string literals and string locals", async () => {
 
   assert.equal(result.mainType, "unit");
   assert.deepEqual(result.prints, ["Hello,\nOJaml!", "done\t\""]);
+  assert.equal(result.output, "Hello,\nOJaml!done\t\"");
+});
+
+test("print appends plain text output without list formatting", async () => {
+  const result = await runOJaml(`let main =
+  let _ = print "a\\n" in
+  let _ = print 7 in
+  let _ = print "\\n" in
+  print "done"`);
+
+  assert.equal(result.mainType, "unit");
+  assert.deepEqual(result.prints, ["a\n", 7, "\n", "done"]);
+  assert.equal(result.output, "a\n7\ndone");
+});
+
+test("println appends a newline after printable values", async () => {
+  const result = await runOJaml(`let main =
+  let _ = println "first" in
+  let _ = println 2 in
+  let _ = println 3.5 in
+  print "done"`);
+
+  assert.equal(result.mainType, "unit");
+  assert.deepEqual(result.prints, ["first", "\n", 2, "\n", 3.5, "\n", "done"]);
+  assert.equal(result.output, "first\n2\n3.5\ndone");
+});
+
+test("to_string formats primitives and collection values", async () => {
+  const result = await runOJaml(`let main =
+  let xs = List.cons 1 (List.cons 2 (List.empty ())) in
+  let words = Array.make 2 "x" in
+  let _ = Array.set words 1 "y" in
+  let years = Map.set (Map.set (Map.empty ()) "Ada" 1815) "Grace" 1906 in
+  let _ = print (String.concat (to_string 42) "\\n") in
+  let _ = print (String.concat (to_string 3.5) "\\n") in
+  let _ = print (String.concat (to_string true) "\\n") in
+  let _ = print (String.concat (to_string "ok") "\\n") in
+  let _ = print (String.concat (to_string ()) "\\n") in
+  let _ = print (String.concat (to_string xs) "\\n") in
+  let _ = print (String.concat (to_string words) "\\n") in
+  print (to_string years)`);
+
+  assert.equal(result.mainType, "unit");
+  assert.equal(result.output, "42\n3.5\ntrue\nok\n()\n[1, 2]\n[x, y]\n{ Grace: 1906, Ada: 1815 }");
 });
 
 test("monaco diagnostics include type errors", () => {
   const markers = getOJamlSyntaxMarkers(`let main = print ()`, 8);
 
   assert.equal(markers.length, 1);
-  assert.match(markers[0].message, /print expects int or string/);
+  assert.match(markers[0].message, /print expects int, float, or string/);
+});
+
+test("println rejects non-printable values", () => {
+  const markers = getOJamlSyntaxMarkers(`let main = println ()`, 8);
+
+  assert.equal(markers.length, 1);
+  assert.match(markers[0].message, /println expects int, float, or string/);
+});
+
+test("runs float arithmetic, comparisons, conversion, and printing", async () => {
+  const result = await runOJaml(`let square x = x * x
+
+let main =
+  let total = square 3.0 + square 4.0 in
+  let _ = print total in
+  if total >= 25.0 then total / Float.of_int 5 else 0.0`);
+
+  assert.equal(result.mainType, "float");
+  assert.equal(result.value, 5);
+  assert.deepEqual(result.prints, [25]);
+});
+
+test("recursive numeric functions can be called with floats without rewriting integer literals", async () => {
+  const result = await runOJaml(`let rec cube_root_search n guess =
+  let cubed = guess * guess * guess in
+  if cubed = n then guess else
+  if cubed > n then guess - 1 else cube_root_search n (guess + 1)
+
+let main = cube_root_search 512.0 1.0`);
+
+  assert.equal(result.mainType, "float");
+  assert.equal(result.value, 8);
+});
+
+test("polymorphic collections store floats", async () => {
+  const result = await runOJaml(`let main =
+  let xs = Array.make 2 0.5 in
+  let _ = Array.set xs 1 1.5 in
+  let ys = List.cons (Array.get xs 0) (List.cons (Array.get xs 1) (List.empty ())) in
+  let _ = print (Array.get xs 1) in
+  let _ = print (List.head ys) in
+  Float.to_int (Array.get xs 0 + List.head (List.tail ys))`);
+
+  assert.equal(result.value, 2);
+  assert.deepEqual(result.prints, [1.5, 0.5]);
+});
+
+test("strings expose concat, length, and split primitives", async () => {
+  const result = await runOJaml(`let main =
+  let greeting = String.concat "hello" " world" in
+  let parts = String.split greeting " " in
+  let _ = print (List.head parts) in
+  let _ = print (List.head (List.tail parts)) in
+  String.length greeting + List.length parts`);
+
+  assert.equal(result.value, 13);
+  assert.deepEqual(result.prints, ["hello", "world"]);
+});
+
+test("string split handles missing separators and repeated separators", async () => {
+  const result = await runOJaml(`let main =
+  let one = String.split "abc" "," in
+  let repeated = String.split "a,,b" "," in
+  let _ = print (List.head one) in
+  let _ = print (List.head repeated) in
+  let _ = print (List.head (List.tail repeated)) in
+  let _ = print (List.head (List.tail (List.tail repeated))) in
+  List.length one + List.length repeated`);
+
+  assert.equal(result.value, 4);
+  assert.deepEqual(result.prints, ["abc", "a", "", "b"]);
 });
 
 test("polymorphic arrays store ints and strings through one API", async () => {
@@ -171,7 +332,17 @@ test("maps expose empty, set, get, has true, and has false", async () => {
   assert.equal(result.value, 2);
 });
 
-test("match supports int, string, bool, unit, wildcard, and variable patterns", async () => {
+test("maps use latest value for duplicate keys and support float values", async () => {
+  const result = await runOJaml(`let main =
+  let m = Map.empty () in
+  let m = Map.set m "score" 1.5 in
+  let m = Map.set m "score" 2.5 in
+  Float.to_int (Map.get m "score" + 0.5)`);
+
+  assert.equal(result.value, 3);
+});
+
+test("match supports int, float, string, bool, unit, wildcard, and variable patterns", async () => {
   const result = await runOJaml(`let classify n =
   match n with
   | 0 -> "zero"
@@ -181,11 +352,47 @@ let main =
   let a = match "ok" with | "ok" -> 1 | _ -> 0 in
   let b = match true with | true -> 2 | false -> 0 | _ -> 0 in
   let c = match () with | () -> 3 | _ -> 0 in
+  let d = match 1.5 with | 1.5 -> 4 | _ -> 0 in
   let _ = print (classify 7) in
-  a + b + c`);
+  a + b + c + d`);
 
-  assert.equal(result.value, 6);
+  assert.equal(result.value, 10);
   assert.deepEqual(result.prints, ["nonzero"]);
+});
+
+const expectedExampleResults: Map<string, { mainType: string; value: number; output: string }> = new Map([
+  ["hello", { mainType: "unit", value: 0, output: "Hello, OJaml!\n" }],
+  ["bindings", { mainType: "int", value: 1815, output: "name = Ada\nyear = 1815\nactive = true\n" }],
+  ["integer-operators", { mainType: "int", value: 22, output: "10 + 4 = 14\nsum - 3 = 11\ndifference * 2 = 22\nproduct / 5 = 4\nproduct mod 5 = 2\n" }],
+  ["float-operators", { mainType: "float", value: 6, output: "7.5 + 2.5 = 10\na - 1 = 9\nb * 2.0 = 18\nc / 3 = 6\n" }],
+  ["strings", { mainType: "int", value: 11, output: "greeting = hello world\nwords = [hello, world]\nlength = 11\n" }],
+  ["arrays", { mainType: "int", value: 60, output: "scores = [10, 20, 30]\nlength = 3\n" }],
+  ["lists", { mainType: "int", value: 3, output: "items = [first, second, third]\nrest = [second, third]\nlength = 3\n" }],
+  ["maps", { mainType: "int", value: 1906, output: "years = { Grace: 1906, Ada: 1815 }\nAda = 1815\nGrace = found\n" }],
+  ["type-inference", { mainType: "int", value: 87, output: "square 9 = 81\nsquare 2.5 = 6.25\n" }],
+  ["pattern-matching", { mainType: "unit", value: 0, output: "many\none\none point five\nother\n" }],
+  ["factorial", { mainType: "int", value: 720, output: "720\n" }],
+  ["fibonacci", { mainType: "int", value: 55, output: "55\n" }],
+  ["gcd", { mainType: "int", value: 21, output: "21\n" }],
+  ["cube-root", { mainType: "float", value: 8.00000000023283, output: "8.00000000023283\n" }],
+  ["higher-order", { mainType: "int", value: 36, output: "13\n12\n11\n" }],
+  ["language-tour", { mainType: "int", value: 1892, output: "OJaml tour\ntyped\n" }],
+] as const);
+
+test("all bundled editor examples produce their expected behavior", async () => {
+  for (const example of ojamlExamples) {
+    const result = await runOJaml(example.source);
+    const expected = expectedExampleResults.get(example.id);
+    assert.ok(expected, `${example.id} has an expected transcript`);
+    assert.equal(result.mainType, expected.mainType, `${example.id} main type`);
+    assert.equal(result.output, expected.output, `${example.id} output`);
+    if (result.mainType === "float") {
+      assert.ok(Math.abs(result.value - expected.value) < 1e-9, `${example.id} value`);
+    } else {
+      assert.equal(result.value, expected.value, `${example.id} value`);
+    }
+  }
+  assert.equal(expectedExampleResults.size, ojamlExamples.length);
 });
 
 test("polymorphic arrays reject mixed element writes", () => {
@@ -221,6 +428,26 @@ test("diagnostics cover undefined names, arity, branch mismatch, and non-exhaust
   assert.match(getOJamlSyntaxMarkers(`let main = match 1 with | 1 -> 10`, 8)[0].message, /catch-all/);
 });
 
+test("negative diagnostics cover invalid primitive and stdlib combinations", () => {
+  const cases: Array<[string, RegExp]> = [
+    [`let main = 5.0 mod 2`, /Type mismatch: float vs int/],
+    [`let main = true + 1`, /Operator expects int or float; got bool/],
+    [`let main = print (List.empty ())`, /print expects int, float, or string/],
+    [`let main = "no"`, /cannot return string directly/],
+    [`let main = Float.of_int 1.5`, /Type mismatch: int vs float/],
+    [`let main = String.length 1`, /Type mismatch: string vs int/],
+    [`let main = Array.get 1 0`, /Type mismatch/],
+    [`let main = List.head 1`, /Type mismatch/],
+    [`let main = Map.has (Map.set (Map.empty ()) "x" 1) 1`, /Type mismatch/],
+  ];
+
+  for (const [source, pattern] of cases) {
+    const markers = getOJamlSyntaxMarkers(source, 8);
+    assert.equal(markers.length, 1, source);
+    assert.match(markers[0].message, pattern, source);
+  }
+});
+
 test("checker exposes real inferred types for editor hovers", () => {
   const checked = check(parse(`let inc x = x + 1
 let make_adder x = fun y -> x + y
@@ -234,8 +461,8 @@ let main =
 
   const symbols = new Map(checked.symbols.map((symbol) => [symbol.name, symbol]));
   assert.equal(symbols.get("greeting")?.detail, undefined);
-  assert.equal(symbols.get("inc")?.detail, "inc : int -> int");
-  assert.equal(symbols.get("make_adder")?.detail, "make_adder : int -> int -> int");
+  assert.equal(symbols.get("inc")?.detail, "inc : number -> number");
+  assert.equal(symbols.get("make_adder")?.detail, "make_adder : number -> number -> number");
   assert.equal(symbols.get("main")?.detail, "main : int");
   const mainLocals = new Map(symbols.get("main")?.locals?.map((symbol) => [symbol.name, symbol.detail]));
   assert.equal(mainLocals.get("greeting"), "greeting : string");
@@ -265,6 +492,77 @@ test("monaco hover describes typed and lexical tokens", () => {
   assert.equal(main?.detail, "main : int");
   assert.equal(keyword?.detail, "if keyword");
   assert.equal(operator?.detail, "+ operator");
+});
+
+test("numeric polymorphic functions expose numeric signatures in editor metadata", () => {
+  const checked = check(parse(`let square x = x * x
+
+let main =
+  let int_square = square 9 in
+  let float_square = square 2.5 in
+  int_square + Float.to_int float_square`));
+
+  const symbols = new Map(checked.symbols.map((symbol) => [symbol.name, symbol]));
+  assert.equal(symbols.get("square")?.detail, "square : number -> number");
+  assert.equal(symbols.get("square")?.params?.[0]?.detail, "x : number");
+});
+
+test("numeric polymorphic functions execute correctly at int and float call sites", async () => {
+  const result = await runOJaml(`let square x = x * x
+
+let main =
+  let int_square = square 9 in
+  let float_square = square 2.5 in
+  let _ = println (String.concat "square 9 = " (to_string int_square)) in
+  let _ = println (String.concat "square 2.5 = " (to_string float_square)) in
+  int_square + Float.to_int float_square`);
+
+  assert.equal(result.value, 87);
+  assert.equal(result.output, "square 9 = 81\nsquare 2.5 = 6.25\n");
+});
+
+test("numeric specialization works for mixed arities and higher-order top-level functions", async () => {
+  const result = await runOJaml(`let square x = x * x
+let apply f x = f x
+let affine a b = a * 2 + b
+
+let main =
+  let direct_int = square 9 in
+  let direct_float = square 2.5 in
+  let applied_float = apply square 3.5 in
+  let affine_int = affine 2 1 in
+  let affine_float = affine 2.5 1.5 in
+  let _ = println (String.concat "direct_int = " (to_string direct_int)) in
+  let _ = println (String.concat "direct_float = " (to_string direct_float)) in
+  let _ = println (String.concat "applied_float = " (to_string applied_float)) in
+  let _ = println (String.concat "affine_int = " (to_string affine_int)) in
+  let _ = println (String.concat "affine_float = " (to_string affine_float)) in
+  direct_int + Float.to_int direct_float + Float.to_int applied_float + affine_int + Float.to_int affine_float`);
+
+  assert.equal(result.value, 110);
+  assert.equal(result.output, [
+    "direct_int = 81",
+    "direct_float = 6.25",
+    "applied_float = 12.25",
+    "affine_int = 5",
+    "affine_float = 6.5",
+    "",
+  ].join("\n"));
+});
+
+test("to_string recursively formats nested arrays, lists, maps, and function values", async () => {
+  const result = await runOJaml(`let inc x = x + 1
+
+let main =
+  let rows = Array.make 2 (List.empty ()) in
+  let _ = Array.set rows 0 (List.cons 1 (List.cons 2 (List.empty ()))) in
+  let _ = Array.set rows 1 (List.cons 3 (List.empty ())) in
+  let lookup = Map.set (Map.empty ()) "rows" rows in
+  let _ = println (to_string rows) in
+  let _ = println (to_string lookup) in
+  println (to_string inc)`);
+
+  assert.match(result.output, /^\[\[1, 2\], \[3\]\]\n\{ rows: \[\[1, 2\], \[3\]\] \}\nFunction \d+\n$/);
 });
 
 test("anonymous functions are first-class values", async () => {

@@ -20,6 +20,7 @@ export type Declaration = {
 
 export type Expr =
   | { kind: "Int"; value: number; span: SourceSpan }
+  | { kind: "Float"; value: number; span: SourceSpan }
   | { kind: "String"; value: string; span: SourceSpan }
   | { kind: "Bool"; value: boolean; span: SourceSpan }
   | { kind: "Unit"; span: SourceSpan }
@@ -42,6 +43,7 @@ export type MatchArm = {
 
 export type Pattern =
   | { kind: "PInt"; value: number; span: SourceSpan }
+  | { kind: "PFloat"; value: number; span: SourceSpan }
   | { kind: "PString"; value: string; span: SourceSpan }
   | { kind: "PBool"; value: boolean; span: SourceSpan }
   | { kind: "PUnit"; span: SourceSpan }

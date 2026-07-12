@@ -102,7 +102,7 @@ export function OJamlEditor({
       setResult([
         `main = ${run.mainType === "unit" ? "()" : run.value}`,
         `wasm bytes = ${wasm.byteLength}`,
-        run.prints.length ? `prints = ${run.prints.join(", ")}` : "",
+        run.output ? `output:\n${run.output}` : "",
       ].filter(Boolean).join("\n"));
       setActiveTab("result");
     } catch (error) {

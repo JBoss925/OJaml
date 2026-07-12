@@ -54,6 +54,7 @@ export function configureOJamlMonaco(monaco: Monaco): void {
         [/"([^"\\]|\\.)*$/, "string.invalid"],
         [/"/, "string", "@string"],
         [/[a-zA-Z_][a-zA-Z0-9_'.]*/, { cases: { "@keywords": "keyword", "@default": "identifier" } }],
+        [/\d+\.\d+/, "number.float"],
         [/\d+/, "number"],
         [/->|<>|<=|>=|&&|\|\||[+\-*/=<>]/, "operator"],
         [/[()]/, "delimiter"],
@@ -193,10 +194,10 @@ function registerOJamlProviders(monaco: Monaco): void {
         {
           label: "print",
           kind: monaco.languages.CompletionItemKind.Function,
-          detail: "print : int|string -> unit",
+          detail: "print : int|float|string -> unit",
           insertText: "print ${1:value}",
           insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-          documentation: "Prints an integer or string and returns unit.",
+          documentation: "Prints an integer, float, or string and returns unit.",
           range,
         },
         ...stdlibCompletions.filter((signature) => signature.name !== "print").map((signature) => ({
@@ -269,15 +270,19 @@ function registerOJamlProviders(monaco: Monaco): void {
         endLineNumber: position.lineNumber,
         endColumn: position.column,
       });
-      if (!/\bprint\s+[^ \n\t(]*$/.test(prefix) && !/\bprint\s+\($/.test(prefix)) return null;
+      const call = prefix.match(/\b(print|println)\s+(?:[^ \n\t(]*|\()$/);
+      if (!call) return null;
+      const name = call[1];
       return {
         value: {
           activeParameter: 0,
           activeSignature: 0,
           signatures: [{
-            label: "print value",
-            documentation: "Prints an int or string and returns unit.",
-            parameters: [{ label: "value: int | string" }],
+            label: `${name} value`,
+            documentation: name === "println"
+              ? "Prints an int, float, or string followed by a newline and returns unit."
+              : "Prints an int, float, or string and returns unit.",
+            parameters: [{ label: "value: int | float | string" }],
           }],
         },
         dispose() {},

@@ -8,10 +8,10 @@ OJaml is an OCaml-inspired language implemented in TypeScript and compiled to We
 - Static checks for bindings, calls, branches, pattern matches, and standard-library usage.
 - Polymorphic type inference for functions and collection builtins.
 - First-class functions and closures with captured locals.
-- WebAssembly text backend using a uniform `i32` value representation.
+- WebAssembly text backend using a uniform `i32` value representation plus concrete int/float specializations for numeric-polymorphic functions.
 - Browser editor/playground with Monaco completions, diagnostics, and hover metadata.
 - Node CLI for local compile/run workflows.
-- Test suite covering parser, checker, runtime, stdlib, closures, and examples.
+- Test suite covering parser, checker, runtime, stdlib, closures, exact editor-example transcripts, and compiler specialization regressions.
 
 ## Language Snapshot
 
@@ -23,7 +23,7 @@ let rec fact n =
   | _ -> n * fact (n - 1)
 
 let main =
-  print "Hello, OJaml!";
+  println "Hello, OJaml!";
   fact 6
 ```
 
@@ -32,18 +32,25 @@ Supported language features:
 - `let` and `let rec` top-level bindings
 - Local `let ... in ...`
 - Anonymous functions and first-class function values
-- Integers, booleans, strings, and unit
-- Arithmetic, comparison, equality, boolean, and `mod` operators
+- Integers, floats, booleans, strings, and unit
+- Integer and float arithmetic, comparison, equality, boolean, and integer `mod` operators
+- Numeric-polymorphic helpers displayed as `number -> number` and emitted with concrete int/float call-site specializations
 - `if ... then ... else`
 - OCaml-style `match ... with | pat -> expr`
-- Wildcard, int, string, bool, unit, and variable patterns
+- Wildcard, int, float, string, bool, unit, and variable patterns
 - Polymorphic arrays, lists, maps, and higher-order collection functions
-- `print : int -> unit` and `print : string -> unit`
+- `print : int|float|string -> unit`
+- `println : int|float|string -> unit`
+- `to_string : 'a -> string`
 
 ## Standard Library Surface
 
 - `Array.make`, `Array.length`, `Array.get`, `Array.set`
 - `Array.map`, `Array.iter`, `Array.fold_left`
+- `Float.of_int`, `Float.to_int`
+- `print`, `println`
+- `to_string`
+- `String.concat`, `String.length`, `String.split`
 - `List.empty`, `List.cons`, `List.head`, `List.tail`, `List.is_empty`, `List.length`
 - `List.map`, `List.iter`, `List.fold_left`
 - `Map.empty`, `Map.set`, `Map.get`, `Map.has`
@@ -103,18 +110,23 @@ npm run preview
 
 ```text
 src/
+  ast.ts              Program, declaration, expression, and pattern types
+  check.ts            Static checks, unification, stdlib schemes, hover metadata
   cli.ts              Node CLI entrypoint
+  compiler.ts         WebAssembly text emission, stdlib helpers, closure lowering
   components/         OJaml editor UI
-  compiler/           Lexer, parser, checker, emitter, runtime helpers
-  examples/           Built-in editor examples
-  language/           Monaco language service integration
+  lexer.ts            Tokenization, comments, literals, source spans
+  monacoOJaml.ts      Monaco diagnostics, completions, hovers, signature help
+  ojamlExamples.ts    Built-in editor examples and source programs
+  parser.ts           Recursive-descent parser
+  runtime.ts          WABT conversion, host imports, execution result
 tests/                Node test suite
 examples/             CLI-friendly source examples
 ```
 
 ## Runtime Model
 
-The WebAssembly backend uses a uniform `i32` representation. Integers and booleans are immediate values; heap-backed values such as strings, arrays, lists, maps, and closures are represented as pointers. The checker is responsible for rejecting invalid programs before emission.
+The WebAssembly backend uses a uniform `i32` representation. Integers and booleans are immediate values; heap-backed values such as floats, strings, arrays, lists, maps, and closures are represented as pointers. Numeric-polymorphic top-level functions receive concrete int/float specializations when call sites require different runtime representations. The checker is responsible for rejecting invalid programs before emission.
 
 ## Troubleshooting
 
