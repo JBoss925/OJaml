@@ -106,6 +106,17 @@ class Parser {
   }
 
   private parsePattern(): Pattern {
+    return this.parseConsPattern();
+  }
+
+  private parseConsPattern(): Pattern {
+    const head = this.parseAtomicPattern();
+    if (!this.match("coloncolon")) return head;
+    const tail = this.parseConsPattern();
+    return { kind: "PListCons", head, tail, span: { start: head.span.start, end: tail.span.end } };
+  }
+
+  private parseAtomicPattern(): Pattern {
     const token = this.peek();
     if (this.match("operator", "-")) {
       const valueToken = this.peek();
@@ -121,6 +132,10 @@ class Parser {
     if (this.match("ident")) {
       if (token.text === "_") return { kind: "PWildcard", span: { start: token.start, end: token.end } };
       return { kind: "PVar", name: token.text, span: { start: token.start, end: token.end } };
+    }
+    if (this.match("lbracket")) {
+      this.expect("rbracket", "Expected ']' in empty list pattern");
+      return { kind: "PListNil", span: { start: token.start, end: this.previous().end } };
     }
     if (this.match("lparen")) {
       if (this.match("rparen")) return { kind: "PUnit", span: { start: token.start, end: this.previous().end } };

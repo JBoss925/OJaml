@@ -337,20 +337,40 @@ function emitPatternTest(pattern: Pattern, value: string, context: EmitContext):
         return `(i32.and ${test} ${emitPatternTest(item, itemValue, context)})`;
       }, arityTest);
     }
+    case "PListNil":
+      return `(i32.eqz ${value})`;
+    case "PListCons":
+      return `(i32.and (i32.ne ${value} (i32.const 0)) (i32.and ${emitPatternTest(pattern.head, listHead(value), context)} ${emitPatternTest(pattern.tail, listTail(value), context)}))`;
   }
 }
 
 function emitPatternBindings(pattern: Pattern, value: string): string {
   if (pattern.kind === "PVar") return `(local.set $${safe(pattern.name)} ${value})`;
-  if (pattern.kind !== "PTuple") return "";
-  return pattern.items
-    .map((item, index) => emitPatternBindings(item, tupleItem(value, index)))
-    .filter(Boolean)
-    .join("\n  ");
+  if (pattern.kind === "PTuple") {
+    return pattern.items
+      .map((item, index) => emitPatternBindings(item, tupleItem(value, index)))
+      .filter(Boolean)
+      .join("\n  ");
+  }
+  if (pattern.kind === "PListCons") {
+    return [
+      emitPatternBindings(pattern.head, listHead(value)),
+      emitPatternBindings(pattern.tail, listTail(value)),
+    ].filter(Boolean).join("\n  ");
+  }
+  return "";
 }
 
 function tupleItem(value: string, index: number): string {
   return `(i32.load (i32.add ${value} (i32.const ${4 + index * 4})))`;
+}
+
+function listHead(value: string): string {
+  return `(i32.load ${value})`;
+}
+
+function listTail(value: string): string {
+  return `(i32.load (i32.add ${value} (i32.const 4)))`;
 }
 
 function emitIndirectCall(callee: Expr, args: Expr[], context: EmitContext): string {
@@ -964,6 +984,10 @@ function addPatternLocals(pattern: Pattern, locals: Set<string>): void {
     return;
   }
   if (pattern.kind === "PTuple") pattern.items.forEach((item) => addPatternLocals(item, locals));
+  if (pattern.kind === "PListCons") {
+    addPatternLocals(pattern.head, locals);
+    addPatternLocals(pattern.tail, locals);
+  }
 }
 
 function addPatternBoundNames(pattern: Pattern, bound: Set<string>): void {
@@ -972,6 +996,10 @@ function addPatternBoundNames(pattern: Pattern, bound: Set<string>): void {
     return;
   }
   if (pattern.kind === "PTuple") pattern.items.forEach((item) => addPatternBoundNames(item, bound));
+  if (pattern.kind === "PListCons") {
+    addPatternBoundNames(pattern.head, bound);
+    addPatternBoundNames(pattern.tail, bound);
+  }
 }
 
 function builtinArities(): Array<[string, number]> {

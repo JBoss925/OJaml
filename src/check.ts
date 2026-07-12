@@ -371,10 +371,27 @@ function checkExpr(expr: Expr, globals: Map<string, Binding>, locals: Map<string
         const armType = checkExpr(arm.body, globals, nested, context);
         resultType = resultType ? sameBranches(resultType, armType, arm.span) : armType;
       }
-      if (!hasCatchAll) throw new OJamlError("Match must include a wildcard or variable catch-all arm", expr.span.start, expr.span.end);
+      if (!hasCatchAll && !isStructurallyExhaustiveMatch(expr.arms.map((arm) => arm.pattern), scrutineeType)) {
+        throw new OJamlError("Match must include a wildcard or variable catch-all arm", expr.span.start, expr.span.end);
+      }
       return resultType ?? unitType;
     }
   }
+}
+
+function isStructurallyExhaustiveMatch(patterns: Pattern[], scrutineeType: Type): boolean {
+  const pruned = prune(scrutineeType);
+  if (pruned.kind === "app" && pruned.name === "list") {
+    return patterns.some((pattern) => pattern.kind === "PListNil")
+      && patterns.some((pattern) => pattern.kind === "PListCons" && isPatternCatchAllLike(pattern.head) && isPatternCatchAllLike(pattern.tail));
+  }
+  return false;
+}
+
+function isPatternCatchAllLike(pattern: Pattern): boolean {
+  if (pattern.kind === "PWildcard" || pattern.kind === "PVar") return true;
+  if (pattern.kind === "PTuple") return pattern.items.every(isPatternCatchAllLike);
+  return false;
 }
 
 function resolveVarType(expr: Extract<Expr, { kind: "Var" }>, globals: Map<string, Binding>, locals: Map<string, Type>): Type {
@@ -492,6 +509,20 @@ function checkPattern(pattern: Pattern, scrutinee: Type, locals: Map<string, Typ
       context.tokens.push({ name: "tuple pattern", kind: "literal", type: app("tuple", itemTypes), span: pattern.span });
       const exhaustiveItems = pattern.items.map((item, index) => checkPattern(item, itemTypes[index], locals, context));
       return exhaustiveItems.every(Boolean);
+    }
+    case "PListNil": {
+      const elem = typeVar();
+      unify(scrutinee, app("list", [elem]), pattern.span);
+      context.tokens.push({ name: "[]", kind: "literal", type: app("list", [elem]), span: pattern.span });
+      return false;
+    }
+    case "PListCons": {
+      const elem = typeVar();
+      const listType = app("list", [elem]);
+      unify(scrutinee, listType, pattern.span);
+      checkPattern(pattern.head, elem, locals, context);
+      checkPattern(pattern.tail, listType, locals, context);
+      return false;
     }
     case "PWildcard":
       return true;
@@ -745,9 +776,17 @@ function collectPatternSymbols(
     symbols.push({ name: pattern.name, detail: `${pattern.name} : ${showType(scrutineeType)}`, span: pattern.span });
     return;
   }
-  if (pattern.kind !== "PTuple") return;
-  const itemTypes = pruned.kind === "app" && pruned.name === "tuple"
-    ? pruned.args
-    : pattern.items.map(() => typeVar());
-  pattern.items.forEach((item, index) => collectPatternSymbols(item, itemTypes[index] ?? typeVar(), locals, symbols));
+  if (pattern.kind === "PTuple") {
+    const itemTypes = pruned.kind === "app" && pruned.name === "tuple"
+      ? pruned.args
+      : pattern.items.map(() => typeVar());
+    pattern.items.forEach((item, index) => collectPatternSymbols(item, itemTypes[index] ?? typeVar(), locals, symbols));
+    return;
+  }
+  if (pattern.kind === "PListCons") {
+    const elem = pruned.kind === "app" && pruned.name === "list" ? pruned.args[0] : typeVar();
+    const listType = app("list", [elem]);
+    collectPatternSymbols(pattern.head, elem, locals, symbols);
+    collectPatternSymbols(pattern.tail, listType, locals, symbols);
+  }
 }

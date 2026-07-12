@@ -9,7 +9,10 @@ export type TokenKind =
   | "operator"
   | "lparen"
   | "rparen"
+  | "lbracket"
+  | "rbracket"
   | "comma"
+  | "coloncolon"
   | "pipe"
   | "arrow"
   | "equals"
@@ -83,6 +86,11 @@ export function lex(source: string): Token[] {
       i += 2;
       continue;
     }
+    if (two === "::") {
+      tokens.push({ kind: "coloncolon", text: two, start, end: i + 2 });
+      i += 2;
+      continue;
+    }
     if (symbolicOperators.has(two)) {
       tokens.push({ kind: "operator", text: two, start, end: i + 2 });
       i += 2;
@@ -91,6 +99,8 @@ export function lex(source: string): Token[] {
 
     if (ch === "(") tokens.push({ kind: "lparen", text: ch, start, end: ++i });
     else if (ch === ")") tokens.push({ kind: "rparen", text: ch, start, end: ++i });
+    else if (ch === "[") tokens.push({ kind: "lbracket", text: ch, start, end: ++i });
+    else if (ch === "]") tokens.push({ kind: "rbracket", text: ch, start, end: ++i });
     else if (ch === ",") tokens.push({ kind: "comma", text: ch, start, end: ++i });
     else if (ch === "|") tokens.push({ kind: "pipe", text: ch, start, end: ++i });
     else if (ch === "=") tokens.push({ kind: "equals", text: ch, start, end: ++i });

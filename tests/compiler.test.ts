@@ -53,6 +53,19 @@ test("parses tuple patterns without changing grouped patterns or unit patterns",
   assert.equal(match.arms[0].pattern.items[1].kind, "PString");
 });
 
+test("parses empty and cons list patterns as right-associative patterns", () => {
+  const ast = parse(`let main =
+  match List.empty () with
+  | [] -> 0
+  | head :: second :: tail -> head`);
+  const match = ast.declarations[0].value;
+
+  assert.equal(match.kind, "Match");
+  assert.equal(match.arms[0].pattern.kind, "PListNil");
+  assert.equal(match.arms[1].pattern.kind, "PListCons");
+  assert.equal(match.arms[1].pattern.tail.kind, "PListCons");
+});
+
 test("emits wasm text for scalar program", () => {
   const { wat } = compile(`let main = 40 + 2`);
   assert.match(wat, /export "main"/);
@@ -818,6 +831,73 @@ test("tuple patterns participate in conservative exhaustiveness", () => {
   assert.match(nonExhaustive[0].message, /catch-all/);
 });
 
+test("list patterns match empty, cons, nested cons, and fallback arms", async () => {
+  const result = await runOJaml(`let rec sum xs =
+  match xs with
+  | [] -> 0
+  | head :: tail -> head + sum tail
+
+let describe xs =
+  match xs with
+  | [] -> "empty"
+  | 1 :: 2 :: _ -> "starts one two"
+  | head :: _ -> String.concat "head " (to_string head)
+
+let main =
+  let xs = List.cons 1 (List.cons 2 (List.cons 3 (List.empty ()))) in
+  let _ = println (describe (List.empty ())) in
+  let _ = println (describe xs) in
+  let _ = println (describe (List.cons 9 (List.empty ()))) in
+  sum xs`);
+
+  assert.equal(result.value, 6);
+  assert.equal(result.output, "empty\nstarts one two\nhead 9\n");
+});
+
+test("list patterns bind tails and work inside closures", async () => {
+  const result = await runOJaml(`let main =
+  let xs = List.cons 4 (List.cons 5 (List.empty ())) in
+  match xs with
+  | head :: tail ->
+      let f = fun scale -> head * scale + List.length tail in
+      f 10
+  | [] -> 0`);
+
+  assert.equal(result.value, 41);
+});
+
+test("list patterns reject element and scrutinee mismatches", () => {
+  const cases = [
+    `let main = match List.cons 1 (List.empty ()) with | "one" :: tail -> 1 | _ -> 0`,
+    `let main = match 1 with | [] -> 0 | _ -> 1`,
+    `let main = match List.cons "x" (List.empty ()) with | head :: tail -> head + List.length tail | _ -> 0`,
+  ];
+
+  for (const source of cases) {
+    const markers = getOJamlSyntaxMarkers(source, 8);
+    assert.equal(markers.length, 1, source);
+    assert.match(markers[0].message, /Type mismatch|Operator expects/, source);
+  }
+});
+
+test("list patterns keep conservative exhaustiveness", () => {
+  const exhaustiveEmpty = getOJamlSyntaxMarkers(`let main =
+  match List.empty () with
+  | _ -> 0`, 8);
+  const nonExhaustiveEmptyOnly = getOJamlSyntaxMarkers(`let main =
+  match List.empty () with
+  | [] -> 0`, 8);
+  const nonExhaustiveConsOnly = getOJamlSyntaxMarkers(`let main =
+  match List.cons 1 (List.empty ()) with
+  | head :: tail -> head`, 8);
+
+  assert.equal(exhaustiveEmpty.length, 0);
+  assert.equal(nonExhaustiveEmptyOnly.length, 1);
+  assert.match(nonExhaustiveEmptyOnly[0].message, /catch-all/);
+  assert.equal(nonExhaustiveConsOnly.length, 1);
+  assert.match(nonExhaustiveConsOnly[0].message, /catch-all/);
+});
+
 test("main cannot return tuples directly", () => {
   const markers = getOJamlSyntaxMarkers(`let main = (1, 2)`, 8);
 
@@ -825,7 +905,7 @@ test("main cannot return tuples directly", () => {
   assert.match(markers[0].message, /cannot return \(int, int\) directly/);
 });
 
-test("match supports int, float, string, bool, unit, tuple, wildcard, and variable patterns", async () => {
+test("match supports int, float, string, bool, unit, tuple, list, wildcard, and variable patterns", async () => {
   const result = await runOJaml(`let classify n =
   match n with
   | 0 -> "zero"
@@ -837,10 +917,11 @@ let main =
   let c = match () with | () -> 3 | _ -> 0 in
   let d = match 1.5 with | 1.5 -> 4 | _ -> 0 in
   let e = match (2, 3) with | (x, y) -> x + y in
+  let f = match List.cons 5 (List.empty ()) with | head :: [] -> head | _ -> 0 in
   let _ = print (classify 7) in
-  a + b + c + d + e`);
+  a + b + c + d + e + f`);
 
-  assert.equal(result.value, 15);
+  assert.equal(result.value, 20);
   assert.deepEqual(result.prints, ["nonzero"]);
 });
 
@@ -851,12 +932,12 @@ const expectedExampleResults: Map<string, { mainType: string; value: number; out
   ["float-operators", { mainType: "float", value: 14, output: "7.5 + 2.5 = 10\na - 1 = 9\nb * 2.0 = 18\nc / 3 = 6\n2.0 ** 3 = 8\n" }],
   ["strings", { mainType: "int", value: 11, output: "greeting = hello world\nwords = [hello, world]\nlength = 11\n" }],
   ["arrays", { mainType: "int", value: 60, output: "scores = [10, 20, 30]\nlength = 3\n" }],
-  ["lists", { mainType: "int", value: 3, output: "items = [first, second, third]\nrest = [second, third]\nlength = 3\n" }],
+  ["lists", { mainType: "int", value: 3, output: "items = [first, second, third]\nfirst = first\nrest = [second, third]\nlength = 3\n" }],
   ["maps", { mainType: "int", value: 1906, output: "years = { Grace: 1906, Ada: 1815 }\nAda = 1815\nGrace = found\n" }],
   ["sets", { mainType: "int", value: 2, output: "names = { Grace, Ada }\nhas Ada = true\n" }],
   ["tuples", { mainType: "int", value: 9, output: "point = (3, 4)\nx = 3\ny = 4\nx + y = 7\nlabeled = (origin, (3, 4))\npoints = [(3, 4), (0, 0)]\n" }],
   ["type-inference", { mainType: "int", value: 87, output: "square 9 = 81\nsquare 2.5 = 6.25\n" }],
-  ["pattern-matching", { mainType: "unit", value: 0, output: "many\none\none point five\nother\n3,4\n" }],
+  ["pattern-matching", { mainType: "unit", value: 0, output: "many\none\none point five\nother\n3,4\nfirst Ada\n" }],
   ["factorial", { mainType: "int", value: 720, output: "720\n" }],
   ["fibonacci", { mainType: "int", value: 55, output: "55\n" }],
   ["gcd", { mainType: "int", value: 21, output: "21\n" }],
@@ -1030,6 +1111,19 @@ test("checker exposes tuple pattern locals for hovers", () => {
   assert.equal(mainLocals.get("name"), "name : string");
   assert.equal(mainLocals.get("year"), "year : int");
   assert.equal(mainLocals.get("active"), "active : bool");
+});
+
+test("checker exposes list pattern locals for hovers", () => {
+  const source = `let main =
+  match List.cons "Ada" (List.empty ()) with
+  | head :: tail -> String.length head + List.length tail
+  | [] -> 0`;
+  const checked = check(parse(source));
+  const symbols = new Map(checked.symbols.map((symbol) => [symbol.name, symbol]));
+  const mainLocals = new Map(symbols.get("main")?.locals?.map((symbol) => [symbol.name, symbol.detail]));
+
+  assert.equal(mainLocals.get("head"), "head : string");
+  assert.equal(mainLocals.get("tail"), "tail : string list");
 });
 
 test("checker exposes fst and snd instantiated tuple types for hovers", () => {

@@ -89,8 +89,18 @@ export const ojamlExamples: OJamlExample[] = [
   let items = List.cons "third" items in
   let items = List.cons "second" items in
   let items = List.cons "first" items in
-  let rest = List.tail items in
+  let rest =
+    match items with
+    | _ :: tail -> tail
+    | [] -> List.empty ()
+  in
+  let first =
+    match items with
+    | head :: _ -> head
+    | [] -> "none"
+  in
   let _ = println (String.concat "items = " (to_string items)) in
+  let _ = println (String.concat "first = " first) in
   let _ = println (String.concat "rest = " (to_string rest)) in
   let _ = println (String.concat "length = " (to_string (List.length items))) in
   if List.is_empty rest then 0 else List.length items`,
@@ -170,12 +180,18 @@ let describe_point point =
   | (0, 0) -> "origin"
   | (x, y) -> String.concat (to_string x) (String.concat "," (to_string y))
 
+let describe_names names =
+  match names with
+  | [] -> "none"
+  | first :: _ -> String.concat "first " first
+
 let main =
   let _ = println (describe_count 3) in
   let _ = println (describe_count 1) in
   let _ = println (describe_float 1.5) in
   let _ = println (describe_float 2.0) in
-  println (describe_point (3, 4))`,
+  let _ = println (describe_point (3, 4)) in
+  println (describe_names (List.cons "Ada" (List.cons "Grace" (List.empty ()))))`,
   },
   {
     id: "factorial",
