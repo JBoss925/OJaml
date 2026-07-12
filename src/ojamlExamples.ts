@@ -125,13 +125,18 @@ export const ojamlExamples: OJamlExample[] = [
     source: `let main =
   let point = (3, 4) in
   let labeled = ("origin", point) in
+  let sum =
+    match point with
+    | (x, y) -> x + y
+  in
   let points = List.cons point (List.cons (0, 0) (List.empty ())) in
   let _ = println (String.concat "point = " (to_string point)) in
   let _ = println (String.concat "x = " (to_string (fst point))) in
   let _ = println (String.concat "y = " (to_string (snd point))) in
+  let _ = println (String.concat "x + y = " (to_string sum)) in
   let _ = println (String.concat "labeled = " (to_string labeled)) in
   let _ = println (String.concat "points = " (to_string points)) in
-  fst point + snd point + List.length points`,
+  sum + List.length points`,
   },
   {
     id: "type-inference",
@@ -160,11 +165,17 @@ let describe_float x =
   | 1.5 -> "one point five"
   | _ -> "other"
 
+let describe_point point =
+  match point with
+  | (0, 0) -> "origin"
+  | (x, y) -> String.concat (to_string x) (String.concat "," (to_string y))
+
 let main =
   let _ = println (describe_count 3) in
   let _ = println (describe_count 1) in
   let _ = println (describe_float 1.5) in
-  println (describe_float 2.0)`,
+  let _ = println (describe_float 2.0) in
+  println (describe_point (3, 4))`,
   },
   {
     id: "factorial",

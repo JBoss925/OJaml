@@ -309,16 +309,48 @@ function emitMatchArms(local: string, arms: { pattern: Pattern; body: Expr }[], 
   ${emitExpr(arm.body, context)}
 )`;
   }
-  const test = arm.pattern.kind === "PInt"
-    ? `(i32.eq (local.get $${local}) (i32.const ${arm.pattern.value}))`
-    : arm.pattern.kind === "PFloat"
-      ? `(f64.eq (call $unbox_float (local.get $${local})) (f64.const ${arm.pattern.value}))`
-    : arm.pattern.kind === "PString"
-      ? `(i32.eq (local.get $${local}) (i32.const ${context.strings.intern(arm.pattern.value)}))`
-    : `(i32.eq (local.get $${local}) (i32.const ${arm.pattern.value ? 1 : 0}))`;
+  const test = emitPatternTest(arm.pattern, `(local.get $${local})`, context);
+  const bindings = emitPatternBindings(arm.pattern, `(local.get $${local})`);
   return `(if (result i32) ${test}
-  (then ${emitExpr(arm.body, context)})
+  (then ${bindings ? `(block (result i32)\n  ${bindings}\n  ${emitExpr(arm.body, context)}\n)` : emitExpr(arm.body, context)})
   (else ${emitMatchArms(local, arms, context, index + 1)}))`;
+}
+
+function emitPatternTest(pattern: Pattern, value: string, context: EmitContext): string {
+  switch (pattern.kind) {
+    case "PInt":
+      return `(i32.eq ${value} (i32.const ${pattern.value}))`;
+    case "PFloat":
+      return `(f64.eq (call $unbox_float ${value}) (f64.const ${pattern.value}))`;
+    case "PString":
+      return `(i32.eq ${value} (i32.const ${context.strings.intern(pattern.value)}))`;
+    case "PBool":
+      return `(i32.eq ${value} (i32.const ${pattern.value ? 1 : 0}))`;
+    case "PUnit":
+    case "PWildcard":
+    case "PVar":
+      return `(i32.const 1)`;
+    case "PTuple": {
+      const arityTest = `(i32.eq (i32.load ${value}) (i32.const ${pattern.items.length}))`;
+      return pattern.items.reduce((test, item, index) => {
+        const itemValue = tupleItem(value, index);
+        return `(i32.and ${test} ${emitPatternTest(item, itemValue, context)})`;
+      }, arityTest);
+    }
+  }
+}
+
+function emitPatternBindings(pattern: Pattern, value: string): string {
+  if (pattern.kind === "PVar") return `(local.set $${safe(pattern.name)} ${value})`;
+  if (pattern.kind !== "PTuple") return "";
+  return pattern.items
+    .map((item, index) => emitPatternBindings(item, tupleItem(value, index)))
+    .filter(Boolean)
+    .join("\n  ");
+}
+
+function tupleItem(value: string, index: number): string {
+  return `(i32.load (i32.add ${value} (i32.const ${4 + index * 4})))`;
 }
 
 function emitIndirectCall(callee: Expr, args: Expr[], context: EmitContext): string {
@@ -868,7 +900,7 @@ function walk(expr: Expr, locals: Set<string>, state: { matchId: number }): void
       locals.add(`__match${state.matchId++}`);
       walk(expr.expr, locals, state);
       for (const arm of expr.arms) {
-        if (arm.pattern.kind === "PVar") locals.add(arm.pattern.name);
+        addPatternLocals(arm.pattern, locals);
         walk(arm.body, locals, state);
       }
       break;
@@ -916,10 +948,30 @@ function freeVars(expr: Expr, bound: Set<string>): Set<string> {
     }
     case "Match":
       addAll(freeVars(expr.expr, bound));
-      expr.arms.forEach((arm) => addAll(freeVars(arm.body, bound)));
+      expr.arms.forEach((arm) => {
+        const nested = new Set(bound);
+        addPatternBoundNames(arm.pattern, nested);
+        addAll(freeVars(arm.body, nested));
+      });
       break;
   }
   return result;
+}
+
+function addPatternLocals(pattern: Pattern, locals: Set<string>): void {
+  if (pattern.kind === "PVar") {
+    locals.add(pattern.name);
+    return;
+  }
+  if (pattern.kind === "PTuple") pattern.items.forEach((item) => addPatternLocals(item, locals));
+}
+
+function addPatternBoundNames(pattern: Pattern, bound: Set<string>): void {
+  if (pattern.kind === "PVar") {
+    bound.add(pattern.name);
+    return;
+  }
+  if (pattern.kind === "PTuple") pattern.items.forEach((item) => addPatternBoundNames(item, bound));
 }
 
 function builtinArities(): Array<[string, number]> {

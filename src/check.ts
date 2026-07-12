@@ -486,6 +486,13 @@ function checkPattern(pattern: Pattern, scrutinee: Type, locals: Map<string, Typ
       unify(scrutinee, unitType, pattern.span);
       context.tokens.push({ name: "()", kind: "literal", type: unitType, span: pattern.span });
       return false;
+    case "PTuple": {
+      const itemTypes = pattern.items.map(() => typeVar());
+      unify(scrutinee, app("tuple", itemTypes), pattern.span);
+      context.tokens.push({ name: "tuple pattern", kind: "literal", type: app("tuple", itemTypes), span: pattern.span });
+      const exhaustiveItems = pattern.items.map((item, index) => checkPattern(item, itemTypes[index], locals, context));
+      return exhaustiveItems.every(Boolean);
+    }
     case "PWildcard":
       return true;
     case "PVar":
@@ -716,15 +723,31 @@ function collectLocalSymbolsInExpr(
       collectLocalSymbolsInExpr(expr.expr, globals, locals, symbols);
       expr.arms.forEach((arm) => {
         const nested = new Map(locals);
-        if (arm.pattern.kind === "PVar") {
-          const scrutineeType = checkExpr(expr.expr, globals, locals, { tokens: [] });
-          nested.set(arm.pattern.name, scrutineeType);
-          symbols.push({ name: arm.pattern.name, detail: `${arm.pattern.name} : ${showType(scrutineeType)}`, span: arm.pattern.span });
-        }
+        const scrutineeType = checkExpr(expr.expr, globals, locals, { tokens: [] });
+        collectPatternSymbols(arm.pattern, scrutineeType, nested, symbols);
         collectLocalSymbolsInExpr(arm.body, globals, nested, symbols);
       });
       return undefined;
     default:
       return undefined;
   }
+}
+
+function collectPatternSymbols(
+  pattern: Pattern,
+  scrutineeType: Type,
+  locals: Map<string, Type>,
+  symbols: Array<{ name: string; detail: string; span: SourceSpan }>,
+): void {
+  const pruned = prune(scrutineeType);
+  if (pattern.kind === "PVar") {
+    locals.set(pattern.name, scrutineeType);
+    symbols.push({ name: pattern.name, detail: `${pattern.name} : ${showType(scrutineeType)}`, span: pattern.span });
+    return;
+  }
+  if (pattern.kind !== "PTuple") return;
+  const itemTypes = pruned.kind === "app" && pruned.name === "tuple"
+    ? pruned.args
+    : pattern.items.map(() => typeVar());
+  pattern.items.forEach((item, index) => collectPatternSymbols(item, itemTypes[index] ?? typeVar(), locals, symbols));
 }

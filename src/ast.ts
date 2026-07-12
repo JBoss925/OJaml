@@ -48,5 +48,6 @@ export type Pattern =
   | { kind: "PString"; value: string; span: SourceSpan }
   | { kind: "PBool"; value: boolean; span: SourceSpan }
   | { kind: "PUnit"; span: SourceSpan }
+  | { kind: "PTuple"; items: Pattern[]; span: SourceSpan }
   | { kind: "PWildcard"; span: SourceSpan }
   | { kind: "PVar"; name: string; span: SourceSpan };

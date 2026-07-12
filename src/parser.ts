@@ -123,8 +123,18 @@ class Parser {
       return { kind: "PVar", name: token.text, span: { start: token.start, end: token.end } };
     }
     if (this.match("lparen")) {
+      if (this.match("rparen")) return { kind: "PUnit", span: { start: token.start, end: this.previous().end } };
+      const pattern = this.parsePattern();
+      if (this.match("comma")) {
+        const items = [pattern];
+        do {
+          items.push(this.parsePattern());
+        } while (this.match("comma"));
+        this.expect("rparen", "Expected ')' in tuple pattern");
+        return { kind: "PTuple", items, span: { start: token.start, end: this.previous().end } };
+      }
       this.expect("rparen", "Expected ')' in unit pattern");
-      return { kind: "PUnit", span: { start: token.start, end: this.previous().end } };
+      return pattern;
     }
     throw new OJamlError("Expected pattern", token.start, token.end);
   }

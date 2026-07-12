@@ -40,6 +40,19 @@ test("parses tuple expressions without changing grouped expressions or unit", ()
   assert.equal(main.body.body.value.kind, "Tuple");
 });
 
+test("parses tuple patterns without changing grouped patterns or unit patterns", () => {
+  const ast = parse(`let main =
+  match (1, "one") with
+  | (n, ("nested")) -> n
+  | _ -> 0`);
+  const match = ast.declarations[0].value;
+
+  assert.equal(match.kind, "Match");
+  assert.equal(match.arms[0].pattern.kind, "PTuple");
+  assert.equal(match.arms[0].pattern.items.length, 2);
+  assert.equal(match.arms[0].pattern.items[1].kind, "PString");
+});
+
 test("emits wasm text for scalar program", () => {
   const { wat } = compile(`let main = 40 + 2`);
   assert.match(wat, /export "main"/);
@@ -737,6 +750,74 @@ test("fst and snd reject non-pairs and arity mismatches", () => {
   }
 });
 
+test("tuple patterns destructure pairs and nested tuples", async () => {
+  const result = await runOJaml(`let main =
+  let point = (3, 4) in
+  let labeled = ("point", (point, true)) in
+  match labeled with
+  | (name, ((x, y), true)) ->
+      let _ = println (String.concat name (String.concat " = " (to_string (x, y)))) in
+      x * 10 + y
+  | _ -> 0`);
+
+  assert.equal(result.value, 34);
+  assert.equal(result.output, "point = (3, 4)\n");
+});
+
+test("tuple patterns support literal arms and fallback matching", async () => {
+  const result = await runOJaml(`let classify point =
+  match point with
+  | (0, 0) -> "origin"
+  | (0, y) -> String.concat "y-axis " (to_string y)
+  | (x, 0) -> String.concat "x-axis " (to_string x)
+  | _ -> "other"
+
+let main =
+  let _ = println (classify (0, 0)) in
+  let _ = println (classify (0, 5)) in
+  let _ = println (classify (7, 0)) in
+  println (classify (2, 3))`);
+
+  assert.equal(result.output, "origin\ny-axis 5\nx-axis 7\nother\n");
+});
+
+test("tuple pattern bindings work inside closures", async () => {
+  const result = await runOJaml(`let main =
+  match (2, 5) with
+  | (x, y) ->
+      let f = fun z -> x * z + y in
+      f 10`);
+
+  assert.equal(result.value, 25);
+});
+
+test("tuple patterns reject arity and element type mismatches", () => {
+  const cases = [
+    `let main = match (1, 2) with | (x, y, z) -> x | _ -> 0`,
+    `let main = match (1, "one") with | (1, 2) -> 1 | _ -> 0`,
+    `let main = match 1 with | (x, y) -> x | _ -> 0`,
+  ];
+
+  for (const source of cases) {
+    const markers = getOJamlSyntaxMarkers(source, 8);
+    assert.equal(markers.length, 1, source);
+    assert.match(markers[0].message, /Type mismatch/, source);
+  }
+});
+
+test("tuple patterns participate in conservative exhaustiveness", () => {
+  const exhaustive = getOJamlSyntaxMarkers(`let main =
+  match (1, 2) with
+  | (x, y) -> x + y`, 8);
+  const nonExhaustive = getOJamlSyntaxMarkers(`let main =
+  match (1, 2) with
+  | (1, y) -> y`, 8);
+
+  assert.equal(exhaustive.length, 0);
+  assert.equal(nonExhaustive.length, 1);
+  assert.match(nonExhaustive[0].message, /catch-all/);
+});
+
 test("main cannot return tuples directly", () => {
   const markers = getOJamlSyntaxMarkers(`let main = (1, 2)`, 8);
 
@@ -744,7 +825,7 @@ test("main cannot return tuples directly", () => {
   assert.match(markers[0].message, /cannot return \(int, int\) directly/);
 });
 
-test("match supports int, float, string, bool, unit, wildcard, and variable patterns", async () => {
+test("match supports int, float, string, bool, unit, tuple, wildcard, and variable patterns", async () => {
   const result = await runOJaml(`let classify n =
   match n with
   | 0 -> "zero"
@@ -755,10 +836,11 @@ let main =
   let b = match true with | true -> 2 | false -> 0 | _ -> 0 in
   let c = match () with | () -> 3 | _ -> 0 in
   let d = match 1.5 with | 1.5 -> 4 | _ -> 0 in
+  let e = match (2, 3) with | (x, y) -> x + y in
   let _ = print (classify 7) in
-  a + b + c + d`);
+  a + b + c + d + e`);
 
-  assert.equal(result.value, 10);
+  assert.equal(result.value, 15);
   assert.deepEqual(result.prints, ["nonzero"]);
 });
 
@@ -772,9 +854,9 @@ const expectedExampleResults: Map<string, { mainType: string; value: number; out
   ["lists", { mainType: "int", value: 3, output: "items = [first, second, third]\nrest = [second, third]\nlength = 3\n" }],
   ["maps", { mainType: "int", value: 1906, output: "years = { Grace: 1906, Ada: 1815 }\nAda = 1815\nGrace = found\n" }],
   ["sets", { mainType: "int", value: 2, output: "names = { Grace, Ada }\nhas Ada = true\n" }],
-  ["tuples", { mainType: "int", value: 9, output: "point = (3, 4)\nx = 3\ny = 4\nlabeled = (origin, (3, 4))\npoints = [(3, 4), (0, 0)]\n" }],
+  ["tuples", { mainType: "int", value: 9, output: "point = (3, 4)\nx = 3\ny = 4\nx + y = 7\nlabeled = (origin, (3, 4))\npoints = [(3, 4), (0, 0)]\n" }],
   ["type-inference", { mainType: "int", value: 87, output: "square 9 = 81\nsquare 2.5 = 6.25\n" }],
-  ["pattern-matching", { mainType: "unit", value: 0, output: "many\none\none point five\nother\n" }],
+  ["pattern-matching", { mainType: "unit", value: 0, output: "many\none\none point five\nother\n3,4\n" }],
   ["factorial", { mainType: "int", value: 720, output: "720\n" }],
   ["fibonacci", { mainType: "int", value: 55, output: "55\n" }],
   ["gcd", { mainType: "int", value: 21, output: "21\n" }],
@@ -935,6 +1017,19 @@ test("checker exposes tuple token and local types for hovers", () => {
   assert.equal(mainLocals.get("pair"), "pair : (int, string)");
   assert.equal(mainLocals.get("nested"), "nested : ((int, string), bool)");
   assert.equal(tupleToken?.detail, "tuple : (int, string)");
+});
+
+test("checker exposes tuple pattern locals for hovers", () => {
+  const source = `let main =
+  match ("Ada", (1815, true)) with
+  | (name, (year, active)) -> if active then year else 0`;
+  const checked = check(parse(source));
+  const symbols = new Map(checked.symbols.map((symbol) => [symbol.name, symbol]));
+  const mainLocals = new Map(symbols.get("main")?.locals?.map((symbol) => [symbol.name, symbol.detail]));
+
+  assert.equal(mainLocals.get("name"), "name : string");
+  assert.equal(mainLocals.get("year"), "year : int");
+  assert.equal(mainLocals.get("active"), "active : bool");
 });
 
 test("checker exposes fst and snd instantiated tuple types for hovers", () => {

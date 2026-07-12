@@ -38,7 +38,7 @@ Supported language features:
 - Polymorphic functions, including constrained numeric variables displayed as `number -> number` and emitted with concrete int/float call-site specializations
 - `if ... then ... else`
 - OCaml-style `match ... with | pat -> expr`
-- Wildcard, int, float, string, bool, unit, and variable patterns
+- Wildcard, int, float, string, bool, unit, tuple, and variable patterns
 - Pair projection with `fst` and `snd`
 - Polymorphic arrays, lists, sets, maps, tuples in heap-backed values, and higher-order collection functions
 - `print : int|float|string -> unit`
@@ -94,6 +94,8 @@ Map.has : ('k, 'v) map -> 'k -> bool
 All standard-library functions have explicit type schemes so editor hovers, type errors, and autocomplete remain statically meaningful.
 
 `print` appends text directly to the captured output stream; `println` appends a trailing newline. `to_string` formats primitives, tuples, arrays, lists, sets, maps, and functions. Unknown heap-backed values fall back to `Object <ptr>`, and function values format as `Function <ptr>`.
+
+Pattern matching supports primitive literals, unit, wildcard/variable catch-alls, and tuple structure. Tuple patterns may bind nested values, mix literals with binders, and participate in the same conservative exhaustiveness rule as other patterns. Structural patterns for arrays, lists, sets, and maps are intentionally still future work.
 
 ## Prerequisites
 
