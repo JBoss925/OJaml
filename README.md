@@ -31,6 +31,7 @@ let main =
 Supported language features:
 
 - `let` and `let rec` top-level bindings
+- Top-level `open` declarations for built-in standard-library namespaces: `Array`, `Float`, `List`, `Map`, `Set`, and `String`
 - Local `let ... in ...`, local function bindings, and local `let rec` function bindings
 - Anonymous functions and first-class function values, including high-arity function values
 - Integers, floats, booleans, strings, unit, tuples, structural records, and algebraic data types
@@ -93,6 +94,19 @@ Map.has : ('k, 'v) map -> 'k -> bool
 ```
 
 All standard-library functions have explicit type schemes so editor hovers, type errors, and autocomplete remain statically meaningful.
+
+Top-level `open` declarations expose members of built-in namespaces by short name:
+
+```ocaml
+open List
+open String
+
+let main =
+  let words = split (concat "hello" " world") " " in
+  List.length words
+```
+
+Local and top-level bindings still shadow opened names, and ambiguous short names from multiple opened namespaces are rejected. Use the qualified form, such as `String.length` or `List.length`, when two opened namespaces export the same member.
 
 `print` appends text directly to the captured output stream; `println` appends a trailing newline. `to_string` formats primitives, tuples, records, arrays, lists, sets, maps, and functions. Unknown heap-backed values fall back to `Object <ptr>`, and function values format as `Function <ptr>`.
 

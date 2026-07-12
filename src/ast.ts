@@ -7,7 +7,14 @@ export type Program = {
   declarations: TopLevelDeclaration[];
 };
 
-export type TopLevelDeclaration = Declaration | TypeDeclaration;
+export type TopLevelDeclaration = Declaration | TypeDeclaration | OpenDeclaration;
+
+export type OpenDeclaration = {
+  kind: "Open";
+  module: string;
+  moduleSpan: SourceSpan;
+  span: SourceSpan;
+};
 
 export type TypeDeclaration = {
   kind: "Type";

@@ -70,6 +70,21 @@ export const ojamlExamples: OJamlExample[] = [
   length`,
   },
   {
+    id: "open-modules",
+    title: "Open Modules",
+    source: `open List
+open String
+open Float
+
+let main =
+  let words = split (concat "hello" " OJaml") " " in
+  let nums = cons 1 (cons 2 (empty ())) in
+  let _ = println (concat "words = " (to_string words)) in
+  let _ = println (concat "head = " (head words)) in
+  let _ = println (concat "nums = " (to_string nums)) in
+  String.length (head words) + List.length nums + to_int (of_int 3)`,
+  },
+  {
     id: "arrays",
     title: "Arrays",
     source: `let main =

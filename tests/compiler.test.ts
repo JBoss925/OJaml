@@ -15,10 +15,20 @@ function asLet(declaration: ReturnType<typeof parse>["declarations"][number]) {
 test("parses comments, semicolon separators, and module-style identifiers", () => {
   const ast = parse(`(* nested (* comment *) works *)
 let make = Array.make;;
-let main = Array.length (make 2 0)`);
+  let main = Array.length (make 2 0)`);
 
   assert.equal(ast.declarations.length, 2);
-  assert.equal(ast.declarations[0].name, "make");
+  assert.equal(asLet(ast.declarations[0]).name, "make");
+});
+
+test("parses open declarations", () => {
+  const ast = parse(`open List
+
+let main = length (cons 1 (empty ()))`);
+
+  assert.equal(ast.declarations[0].kind, "Open");
+  assert.equal(ast.declarations[0].kind === "Open" ? ast.declarations[0].module : undefined, "List");
+  assert.equal(asLet(ast.declarations[1]).name, "main");
 });
 
 test("parses top-level recursive function", () => {
@@ -688,6 +698,45 @@ test("string split handles missing separators and repeated separators", async ()
 
   assert.equal(result.value, 4);
   assert.deepEqual(result.prints, ["abc", "a", "", "b"]);
+});
+
+test("open declarations expose stdlib module members by short name", async () => {
+  const result = await runOJaml(`open List
+open String
+open Float
+
+let main =
+  let words = split (concat "hello" " world") " " in
+  let nums = cons 1 (cons 2 (empty ())) in
+  let _ = println (head words) in
+  String.length (head words) + List.length nums + to_int (of_int 3)`);
+
+  assert.equal(result.value, 10);
+  assert.equal(result.output, "hello\n");
+});
+
+test("open declarations preserve local and top-level shadowing", async () => {
+  const result = await runOJaml(`open List
+
+let length xs = 99
+
+let main =
+  let cons value tail = tail in
+  let xs = List.cons 1 (List.empty ()) in
+  length xs + List.length (cons 2 xs)`);
+
+  assert.equal(result.value, 100);
+});
+
+test("open declarations reject unknown modules and ambiguous names", () => {
+  const cases = [
+    `open Missing\nlet main = 0`,
+    `open List\nopen Map\nlet main = empty ()`,
+  ];
+
+  for (const source of cases) {
+    assert.ok(getOJamlSyntaxMarkers(source, 8).length > 0, source);
+  }
 });
 
 test("polymorphic arrays store ints and strings through one API", async () => {
@@ -1665,6 +1714,7 @@ const expectedExampleResults: Map<string, { mainType: string; value: number; out
   ["integer-operators", { mainType: "int", value: 30, output: "10 + 4 = 14\nsum - 3 = 11\ndifference * 2 = 22\nproduct / 5 = 4\nproduct mod 5 = 2\n2 ** 3 = 8\n" }],
   ["float-operators", { mainType: "float", value: 14, output: "7.5 + 2.5 = 10\na - 1 = 9\nb * 2.0 = 18\nc / 3 = 6\n2.0 ** 3 = 8\n" }],
   ["strings", { mainType: "int", value: 11, output: "greeting = hello world\nwords = [hello, world]\nlength = 11\n" }],
+  ["open-modules", { mainType: "int", value: 10, output: "words = [hello, OJaml]\nhead = hello\nnums = [1, 2]\n" }],
   ["arrays", { mainType: "int", value: 60, output: "scores = [10, 20, 30]\nlength = 3\ntotal = 60\n" }],
   ["lists", { mainType: "int", value: 3, output: "items = [first, second, third]\nfirst = first\nrest = [second, third]\nlength = 3\n" }],
   ["maps", { mainType: "int", value: 1906, output: "years = { Grace: 1906, Ada: 1815 }\nAda = 1815\nGrace = found\n" }],

@@ -10,7 +10,7 @@ export const markerOwner = "ojaml-language-service";
 
 let providersRegistered = false;
 
-const keywords = ["let", "rec", "in", "if", "then", "else", "true", "false", "fun", "match", "with", "mod", "type", "of"];
+const keywords = ["let", "rec", "in", "if", "then", "else", "true", "false", "fun", "match", "with", "mod", "type", "of", "open"];
 const stdlibCompletions = getStdlibSignatures();
 
 export function configureOJamlMonaco(monaco: Monaco): void {
@@ -295,15 +295,15 @@ function registerOJamlProviders(monaco: Monaco): void {
   });
 }
 
-function getCompletionModulePrefix(model: editor.ITextModel, position: Position, wordStartColumn: number): "Array" | "List" | "Set" | "Map" | undefined {
+function getCompletionModulePrefix(model: editor.ITextModel, position: Position, wordStartColumn: number): "Array" | "Float" | "List" | "Map" | "Set" | "String" | undefined {
   const linePrefix = model.getValueInRange({
     startLineNumber: position.lineNumber,
     startColumn: 1,
     endLineNumber: position.lineNumber,
     endColumn: wordStartColumn,
   });
-  const match = /(?:^|[^A-Za-z0-9_'.])(Array|List|Set|Map)\.$/.exec(linePrefix);
-  return match?.[1] as "Array" | "List" | "Set" | "Map" | undefined;
+  const match = /(?:^|[^A-Za-z0-9_'.])(Array|Float|List|Map|Set|String)\.$/.exec(linePrefix);
+  return match?.[1] as "Array" | "Float" | "List" | "Map" | "Set" | "String" | undefined;
 }
 
 type SymbolInfo = {

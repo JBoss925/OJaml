@@ -1,4 +1,4 @@
-import type { BinaryOp, Declaration, Expr, MatchArm, Pattern, Program, TopLevelDeclaration, TypeDeclaration, TypeExpr } from "./ast";
+import type { BinaryOp, Declaration, Expr, MatchArm, OpenDeclaration, Pattern, Program, TopLevelDeclaration, TypeDeclaration, TypeExpr } from "./ast";
 import { OJamlError } from "./errors";
 import { lex, type Token } from "./lexer";
 
@@ -17,10 +17,23 @@ class Parser {
     const declarations: TopLevelDeclaration[] = [];
     while (!this.at("eof")) {
       if (this.match("semicolon2")) continue;
-      declarations.push(this.at("keyword", "type") ? this.parseTypeDeclaration() : this.parseDeclaration());
+      if (this.at("keyword", "type")) declarations.push(this.parseTypeDeclaration());
+      else if (this.at("keyword", "open")) declarations.push(this.parseOpenDeclaration());
+      else declarations.push(this.parseDeclaration());
       this.match("semicolon2");
     }
     return { declarations };
+  }
+
+  private parseOpenDeclaration(): OpenDeclaration {
+    const start = this.expectKeyword("open").start;
+    const module = this.expect("ident", "Expected module name after open");
+    return {
+      kind: "Open",
+      module: module.text,
+      moduleSpan: { start: module.start, end: module.end },
+      span: { start, end: module.end },
+    };
   }
 
   private parseTypeDeclaration(): TypeDeclaration {

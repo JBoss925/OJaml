@@ -1,4 +1,4 @@
-import type { Declaration, Expr, Pattern, Program } from "./ast";
+import type { Declaration, Expr, OpenDeclaration, Pattern, Program } from "./ast";
 import { check, type CheckedSymbol, type CheckedToken, type OJamlType, type RuntimeMainType } from "./check";
 import { parse } from "./parser";
 
@@ -29,6 +29,8 @@ let nextTableIndex = 0;
 let topLevelClosureIndices = new Map<string, number>();
 let topLevelSpecializations = new Map<string, Map<string, string>>();
 
+const openableModules = new Set(["Array", "Float", "List", "Map", "Set", "String"]);
+
 export function compile(source: string): CompileResult {
   const ast = parse(source);
   const checked = check(ast);
@@ -38,6 +40,7 @@ export function compile(source: string): CompileResult {
 export function emitWat(program: Program, checkedSymbols: CheckedSymbol[] = [], checkedTokens: CheckedToken[] = []): string {
   const declarations = letDeclarations(program);
   const constructors = collectConstructorInfos(program);
+  const openAliases = collectOpenAliases(program);
   lambdaInfos = [];
   nextLambdaId = 0;
   nextTableIndex = 0;
@@ -52,8 +55,8 @@ export function emitWat(program: Program, checkedSymbols: CheckedSymbol[] = [], 
   ]);
   const symbolTypes = collectSymbolTypes(checkedSymbols);
   const tokenTypes = collectTokenTypes(checkedTokens);
-  const globalTypes = collectGlobalTypes(program, symbolTypes.globals);
-  const callHints = collectTopLevelCallHints(program, globalTypes);
+  const globalTypes = collectGlobalTypes(program, symbolTypes.globals, openAliases);
+  const callHints = collectTopLevelCallHints(program, globalTypes, openAliases);
   topLevelSpecializations = collectTopLevelSpecializations(program, callHints, checkedTokens);
   const topLevelWrapperNames = [
     ...declarations.filter((declaration) => declaration.params.length > 0).map((declaration) => declaration.name),
@@ -64,10 +67,10 @@ export function emitWat(program: Program, checkedSymbols: CheckedSymbol[] = [], 
   }
   const emittedDeclarations = declarations.map((declaration) => {
     const checkedLocals = new Map(symbolTypes.locals.get(declaration.name));
-    return emitDeclaration(declaration, globals, globalTypes, strings, checkedLocals, tokenTypes, constructors);
+    return emitDeclaration(declaration, globals, globalTypes, strings, checkedLocals, tokenTypes, constructors, declaration.name, openAliases);
   }).join("\n\n");
-  const specializedDeclarations = emitTopLevelSpecializations(program, globals, globalTypes, strings, tokenTypes, constructors);
-  const lambdas = emitPendingLambdas(globals, globalTypes, strings, tokenTypes, constructors);
+  const specializedDeclarations = emitTopLevelSpecializations(program, globals, globalTypes, strings, tokenTypes, constructors, openAliases);
+  const lambdas = emitPendingLambdas(globals, globalTypes, strings, tokenTypes, constructors, openAliases);
   const dataSegments = strings.emitDataSegments();
   const tableEntries = [
     ...topLevelWrapperNames.map((name) => `$__closure_${safe(name)}`),
@@ -110,13 +113,14 @@ function emitDeclaration(
   tokenTypes = new Map<string, ValueShape>(),
   constructors = new Map<string, ConstructorInfo>(),
   nameOverride = declaration.name,
+  openAliases = new Map<string, string>(),
 ): string {
   const params = declaration.params.map((param) => `(param $${safe(param)} i32)`).join(" ");
   const locals = collectLocals(declaration);
   for (const param of declaration.params) locals.add(param);
-  const localTypes = collectLocalTypes(declaration, globalTypes, checkedLocals);
+  const localTypes = collectLocalTypes(declaration, globalTypes, checkedLocals, openAliases);
   const localLines = [...locals].filter((name) => !declaration.params.includes(name)).map((name) => `  (local $${safe(name)} i32)`);
-  const body = emitExpr(declaration.value, new EmitContext(globals, locals, localTypes, globalTypes, strings, tokenTypes, constructors));
+  const body = emitExpr(declaration.value, new EmitContext(globals, locals, localTypes, globalTypes, strings, tokenTypes, constructors, openAliases));
   const head = `(func $${safe(nameOverride)} ${params}${params ? " " : ""}(result i32)`;
   return [head, ...localLines, indent(body, 2), ")"].join("\n");
 }
@@ -134,6 +138,7 @@ class EmitContext {
     readonly strings: StringPool,
     readonly tokenTypes = new Map<string, ValueShape>(),
     readonly constructors = new Map<string, ConstructorInfo>(),
+    readonly openAliases = new Map<string, string>(),
     readonly captured = new Map<string, number>(),
   ) {}
 
@@ -152,7 +157,12 @@ class EmitContext {
   exprType(expr: Expr): ValueShape {
     const checked = this.tokenTypes.get(spanKey(expr));
     if (checked && checked.kind !== "unknown") return checked;
-    return inferSimpleType(expr, new Map([...this.globalTypes, ...this.localTypes]));
+    return inferSimpleType(expr, new Map([...this.globalTypes, ...this.localTypes]), this.openAliases);
+  }
+
+  resolveName(name: string): string {
+    if (this.locals.has(name) || this.captured.has(name) || this.globals.has(name)) return name;
+    return this.openAliases.get(name) || name;
   }
 }
 
@@ -216,9 +226,10 @@ function emitExpr(expr: Expr, context: EmitContext): string {
       if (expr.callee.kind === "Var" && context.constructors.has(expr.callee.name)) {
         return emitVariantConstructor(context.constructors.get(expr.callee.name)!, expr.args[0], context);
       }
-      if (expr.callee.kind === "Var" && (expr.callee.name === "print" || expr.callee.name === "println")) {
+      if (expr.callee.kind === "Var" && (context.resolveName(expr.callee.name) === "print" || context.resolveName(expr.callee.name) === "println")) {
         const argShape = context.exprType(expr.args[0]);
-        const newline = expr.callee.name === "println" ? `\n  (call $print_string (i32.const ${context.strings.intern("\n")}))` : "";
+        const calleeName = context.resolveName(expr.callee.name);
+        const newline = calleeName === "println" ? `\n  (call $print_string (i32.const ${context.strings.intern("\n")}))` : "";
         if (argShape.kind === "string") {
           return `(block (result i32)
   (call $print_string ${emitExpr(expr.args[0], context)})${newline}
@@ -236,27 +247,29 @@ function emitExpr(expr: Expr, context: EmitContext): string {
   (i32.const 0)
 )`;
       }
-      if (expr.callee.kind === "Var" && expr.callee.name === "to_string") {
+      if (expr.callee.kind === "Var" && context.resolveName(expr.callee.name) === "to_string") {
         const arg = expr.args[0];
         return `(call $host_to_string ${emitExpr(arg, context)} (i32.const ${context.strings.intern(typeDescriptor(context.exprType(arg)))}))`;
       }
-      if (expr.callee.kind === "Var" && (expr.callee.name === "fst" || expr.callee.name === "snd")) {
-        const offset = expr.callee.name === "fst" ? 4 : 8;
+      if (expr.callee.kind === "Var" && (context.resolveName(expr.callee.name) === "fst" || context.resolveName(expr.callee.name) === "snd")) {
+        const offset = context.resolveName(expr.callee.name) === "fst" ? 4 : 8;
         return `(i32.load (i32.add ${emitExpr(expr.args[0], context)} (i32.const ${offset})))`;
       }
-      if (expr.callee.kind === "Var" && (expr.callee.name === "Set.add" || expr.callee.name === "Set.has")) {
+      if (expr.callee.kind === "Var" && (context.resolveName(expr.callee.name) === "Set.add" || context.resolveName(expr.callee.name) === "Set.has")) {
+        const calleeName = context.resolveName(expr.callee.name);
         const elementShape = context.exprType(expr.args[1]);
         const helper = elementShape.kind === "float"
-          ? `${expr.callee.name}.float`
-          : expr.callee.name;
+          ? `${calleeName}.float`
+          : calleeName;
         return `(call $${safe(helper)} ${expr.args.map((arg) => emitExpr(arg, context)).join(" ")})`;
       }
       if (expr.callee.kind === "Var" && (context.locals.has(expr.callee.name) || context.captured.has(expr.callee.name))) {
         return emitIndirectCall(expr.callee, expr.args, context);
       }
-      if (expr.callee.kind === "Var" && context.globals.has(expr.callee.name)) {
-        const specialization = topLevelSpecializations.get(expr.callee.name)?.get(callShapeKey(expr.args.map((arg) => context.exprType(arg))));
-        return `(call $${safe(specialization ?? expr.callee.name)} ${expr.args.map((arg) => emitExpr(arg, context)).join(" ")})`;
+      if (expr.callee.kind === "Var" && context.globals.has(context.resolveName(expr.callee.name))) {
+        const calleeName = context.resolveName(expr.callee.name);
+        const specialization = topLevelSpecializations.get(calleeName)?.get(callShapeKey(expr.args.map((arg) => context.exprType(arg))));
+        return `(call $${safe(specialization ?? calleeName)} ${expr.args.map((arg) => emitExpr(arg, context)).join(" ")})`;
       }
       return emitIndirectCall(expr.callee, expr.args, context);
     case "Fun":
@@ -647,6 +660,7 @@ function emitPendingLambdas(
   strings: StringPool,
   tokenTypes = new Map<string, ValueShape>(),
   constructors = new Map<string, ConstructorInfo>(),
+  openAliases = new Map<string, string>(),
 ): string {
   const emitted: string[] = [];
   let cursor = 0;
@@ -655,13 +669,13 @@ function emitPendingLambdas(
     const locals = collectLocalsFromExpr(lambda.body);
     for (const param of lambda.params) locals.add(param);
     locals.add("__closure");
-    const localTypes = collectLocalTypesFromExpr(lambda.body, new Map([...globalTypes, ...lambda.params.map((param): [string, ValueShape] => [param, unknownShape])]));
+    const localTypes = collectLocalTypesFromExpr(lambda.body, new Map([...globalTypes, ...lambda.params.map((param): [string, ValueShape] => [param, unknownShape])]), openAliases);
     const captured = new Map(lambda.captures.map((name, index) => [name, index]));
     const localLines = [...locals]
       .filter((name) => !lambda.params.includes(name))
       .map((name) => `  (local $${safe(name)} i32)`);
     const params = lambda.params.map((param) => `(param $${safe(param)} i32)`).join(" ");
-    const body = emitExpr(lambda.body, new EmitContext(globals, locals, localTypes, globalTypes, strings, tokenTypes, constructors, captured));
+    const body = emitExpr(lambda.body, new EmitContext(globals, locals, localTypes, globalTypes, strings, tokenTypes, constructors, openAliases, captured));
     emitted.push([`(func $__lambda_${lambda.id} (param $__env i32) ${params} (result i32)`, ...localLines, indent(body, 2), ")"].join("\n"));
   }
   return emitted.join("\n\n");
@@ -712,6 +726,24 @@ function letDeclarations(program: Program): Declaration[] {
   return program.declarations.filter((declaration): declaration is Declaration => declaration.kind === "Let");
 }
 
+function collectOpenAliases(program: Program): Map<string, string> {
+  const aliases = new Map<string, string>();
+  const ambiguous = new Set<string>();
+  const openDeclarations = program.declarations.filter((declaration): declaration is OpenDeclaration => declaration.kind === "Open");
+  for (const declaration of openDeclarations) {
+    if (!openableModules.has(declaration.module)) continue;
+    for (const [name] of builtinArities()) {
+      const prefix = `${declaration.module}.`;
+      if (!name.startsWith(prefix)) continue;
+      const alias = name.slice(prefix.length);
+      if (aliases.has(alias) && aliases.get(alias) !== name) ambiguous.add(alias);
+      else if (!ambiguous.has(alias)) aliases.set(alias, name);
+    }
+  }
+  for (const alias of ambiguous) aliases.delete(alias);
+  return aliases;
+}
+
 function collectConstructorInfos(program: Program): Map<string, ConstructorInfo> {
   const constructors = new Map<string, ConstructorInfo>();
   for (const declaration of program.declarations) {
@@ -728,12 +760,12 @@ function collectConstructorInfos(program: Program): Map<string, ConstructorInfo>
   return constructors;
 }
 
-function collectLocalTypes(declaration: Declaration, globalTypes: Map<string, ValueShape>, checkedLocals = new Map<string, ValueShape>()): Map<string, ValueShape> {
+function collectLocalTypes(declaration: Declaration, globalTypes: Map<string, ValueShape>, checkedLocals = new Map<string, ValueShape>(), openAliases = new Map<string, string>()): Map<string, ValueShape> {
   const types = new Map<string, ValueShape>([...globalTypes, ...checkedLocals]);
   for (const param of declaration.params) {
     if (!types.has(param)) types.set(param, unknownShape);
   }
-  walkTypes(declaration.value, types);
+  walkTypes(declaration.value, types, openAliases);
   return types;
 }
 
@@ -861,33 +893,33 @@ function functionValueName(name: string, shape: ValueShape): string {
   return variants?.values().next().value ?? name;
 }
 
-function collectLocalTypesFromExpr(expr: Expr, types: Map<string, ValueShape>): Map<string, ValueShape> {
-  walkTypes(expr, types);
+function collectLocalTypesFromExpr(expr: Expr, types: Map<string, ValueShape>, openAliases = new Map<string, string>()): Map<string, ValueShape> {
+  walkTypes(expr, types, openAliases);
   return types;
 }
 
-function collectGlobalTypes(program: Program, checkedGlobals = new Map<string, ValueShape>()): Map<string, ValueShape> {
+function collectGlobalTypes(program: Program, checkedGlobals = new Map<string, ValueShape>(), openAliases = new Map<string, string>()): Map<string, ValueShape> {
   const types = new Map<string, ValueShape>([["print", unitShape], ...checkedGlobals]);
   for (const [name] of builtinArities()) types.set(name, builtinReturnShape(name));
   for (const declaration of letDeclarations(program)) {
     if (types.has(declaration.name)) continue;
     if (declaration.params.length === 0) {
-      types.set(declaration.name, inferSimpleType(declaration.value, types));
+      types.set(declaration.name, inferSimpleType(declaration.value, types, openAliases));
     } else {
-      types.set(declaration.name, { kind: "fn", result: inferSimpleType(declaration.value, new Map(declaration.params.map((param) => [param, unknownShape]))) });
+      types.set(declaration.name, { kind: "fn", result: inferSimpleType(declaration.value, new Map(declaration.params.map((param) => [param, unknownShape])), openAliases) });
     }
   }
   return types;
 }
 
-function collectTopLevelCallHints(program: Program, globalTypes: Map<string, ValueShape>): Map<string, ValueShape[]> {
+function collectTopLevelCallHints(program: Program, globalTypes: Map<string, ValueShape>, openAliases = new Map<string, string>()): Map<string, ValueShape[]> {
   const declarations = new Map(letDeclarations(program).map((declaration) => [declaration.name, declaration]));
   const hints = new Map<string, ValueShape[]>();
   const visit = (expr: Expr, localTypes: Map<string, ValueShape>) => {
     if (expr.kind === "Call" && expr.callee.kind === "Var" && declarations.has(expr.callee.name)) {
       const existing = hints.get(expr.callee.name) ?? [];
       expr.args.forEach((arg, index) => {
-        const shape = inferSimpleType(arg, new Map([...globalTypes, ...localTypes]));
+        const shape = inferSimpleType(arg, new Map([...globalTypes, ...localTypes]), openAliases);
         if (shape.kind === "float") existing[index] = floatShape;
         if (shape.kind === "int" && !existing[index]) existing[index] = intShape;
       });
@@ -896,7 +928,7 @@ function collectTopLevelCallHints(program: Program, globalTypes: Map<string, Val
     switch (expr.kind) {
       case "LetIn": {
         const nested = new Map(localTypes);
-        nested.set(expr.name, inferSimpleType(expr.value, new Map([...globalTypes, ...localTypes])));
+        nested.set(expr.name, inferSimpleType(expr.value, new Map([...globalTypes, ...localTypes]), openAliases));
         visit(expr.value, localTypes);
         visit(expr.body, nested);
         break;
@@ -972,6 +1004,7 @@ function emitTopLevelSpecializations(
   strings: StringPool,
   tokenTypes = new Map<string, ValueShape>(),
   constructors = new Map<string, ConstructorInfo>(),
+  openAliases = new Map<string, string>(),
 ): string {
   const declarations = new Map(letDeclarations(program).map((declaration) => [declaration.name, declaration]));
   const emitted: string[] = [];
@@ -981,7 +1014,7 @@ function emitTopLevelSpecializations(
     for (const [key, specializedName] of variants) {
       const shapes = key.split(",").map((shape) => shape === "float" ? floatShape : intShape);
       const checkedLocals = new Map(declaration.params.map((param, index): [string, ValueShape] => [param, shapes[index] ?? intShape]));
-      emitted.push(emitDeclaration(declaration, globals, globalTypes, strings, checkedLocals, tokenTypes, constructors, specializedName));
+      emitted.push(emitDeclaration(declaration, globals, globalTypes, strings, checkedLocals, tokenTypes, constructors, specializedName, openAliases));
     }
   }
   return emitted.join("\n\n");
@@ -991,62 +1024,62 @@ function callShapeKey(shapes: ValueShape[]): string {
   return shapes.map((shape) => shape.kind === "float" ? "float" : "int").join(",");
 }
 
-function applyCallHintsToGlobalTypes(program: Program, globalTypes: Map<string, ValueShape>, hints: Map<string, ValueShape[]>): void {
+function applyCallHintsToGlobalTypes(program: Program, globalTypes: Map<string, ValueShape>, hints: Map<string, ValueShape[]>, openAliases = new Map<string, string>()): void {
   for (const declaration of letDeclarations(program)) {
     const params = hints.get(declaration.name);
     if (!params?.some((shape) => shape?.kind === "float")) continue;
     const paramTypes = new Map(declaration.params.map((param, index): [string, ValueShape] => [param, params[index] ?? unknownShape]));
-    const result = inferSimpleType(declaration.value, new Map([...globalTypes, ...paramTypes]));
+    const result = inferSimpleType(declaration.value, new Map([...globalTypes, ...paramTypes]), openAliases);
     globalTypes.set(declaration.name, { kind: "fn", result: result.kind === "int" || result.kind === "unknown" ? floatShape : result });
   }
 }
 
-function walkTypes(expr: Expr, types: Map<string, ValueShape>): void {
+function walkTypes(expr: Expr, types: Map<string, ValueShape>, openAliases = new Map<string, string>()): void {
   switch (expr.kind) {
     case "LetIn":
-      types.set(expr.name, inferSimpleType(expr.value, types));
-      walkTypes(expr.value, types);
-      walkTypes(expr.body, types);
+      types.set(expr.name, inferSimpleType(expr.value, types, openAliases));
+      walkTypes(expr.value, types, openAliases);
+      walkTypes(expr.body, types, openAliases);
       break;
     case "Binary":
-      walkTypes(expr.left, types);
-      walkTypes(expr.right, types);
+      walkTypes(expr.left, types, openAliases);
+      walkTypes(expr.right, types, openAliases);
       break;
     case "Tuple":
-      expr.items.forEach((item) => walkTypes(item, types));
+      expr.items.forEach((item) => walkTypes(item, types, openAliases));
       break;
     case "TupleAccess":
-      walkTypes(expr.tuple, types);
+      walkTypes(expr.tuple, types, openAliases);
       break;
     case "Record":
-      expr.fields.forEach((field) => walkTypes(field.value, types));
+      expr.fields.forEach((field) => walkTypes(field.value, types, openAliases));
       break;
     case "FieldAccess":
-      walkTypes(expr.record, types);
+      walkTypes(expr.record, types, openAliases);
       break;
     case "Unary":
-      walkTypes(expr.expr, types);
+      walkTypes(expr.expr, types, openAliases);
       break;
     case "If":
-      walkTypes(expr.condition, types);
-      walkTypes(expr.thenBranch, types);
-      walkTypes(expr.elseBranch, types);
+      walkTypes(expr.condition, types, openAliases);
+      walkTypes(expr.thenBranch, types, openAliases);
+      walkTypes(expr.elseBranch, types, openAliases);
       break;
     case "Call":
-      walkTypes(expr.callee, types);
-      expr.args.forEach((arg) => walkTypes(arg, types));
+      walkTypes(expr.callee, types, openAliases);
+      expr.args.forEach((arg) => walkTypes(arg, types, openAliases));
       break;
     case "Fun":
-      walkTypes(expr.body, types);
+      walkTypes(expr.body, types, openAliases);
       break;
     case "Match":
-      walkTypes(expr.expr, types);
-      expr.arms.forEach((arm) => walkTypes(arm.body, types));
+      walkTypes(expr.expr, types, openAliases);
+      expr.arms.forEach((arm) => walkTypes(arm.body, types, openAliases));
       break;
   }
 }
 
-function inferSimpleType(expr: Expr, types: Map<string, ValueShape>): ValueShape {
+function inferSimpleType(expr: Expr, types: Map<string, ValueShape>, openAliases = new Map<string, string>()): ValueShape {
   switch (expr.kind) {
     case "String":
       return stringShape;
@@ -1057,99 +1090,99 @@ function inferSimpleType(expr: Expr, types: Map<string, ValueShape>): ValueShape
     case "Unit":
       return unitShape;
     case "Tuple":
-      return { kind: "tuple", items: expr.items.map((item) => inferSimpleType(item, types)) };
+      return { kind: "tuple", items: expr.items.map((item) => inferSimpleType(item, types, openAliases)) };
     case "TupleAccess": {
-      const tuple = inferSimpleType(expr.tuple, types);
+      const tuple = inferSimpleType(expr.tuple, types, openAliases);
       return tuple.kind === "tuple" ? tuple.items[expr.index] ?? unknownShape : unknownShape;
     }
     case "Record":
-      return { kind: "record", fields: sortedFields(expr.fields).map((field) => ({ name: field.name, value: inferSimpleType(field.value, types) })) };
+      return { kind: "record", fields: sortedFields(expr.fields).map((field) => ({ name: field.name, value: inferSimpleType(field.value, types, openAliases) })) };
     case "FieldAccess": {
-      const record = inferSimpleType(expr.record, types);
+      const record = inferSimpleType(expr.record, types, openAliases);
       return record.kind === "record" ? record.fields.find((field) => field.name === expr.field)?.value ?? unknownShape : unknownShape;
     }
     case "Var":
-      return types.get(expr.name) ?? intShape;
+      return types.get(expr.name) ?? types.get(openAliases.get(expr.name) ?? "") ?? intShape;
     case "If":
-      return inferSimpleType(expr.thenBranch, types);
+      return inferSimpleType(expr.thenBranch, types, openAliases);
     case "LetIn":
-      return inferSimpleType(expr.body, types);
+      return inferSimpleType(expr.body, types, openAliases);
     case "Call":
-      return inferCallShape(expr, types);
+      return inferCallShape(expr, types, openAliases);
     case "Match":
-      return inferSimpleType(expr.arms[0].body, types);
+      return inferSimpleType(expr.arms[0].body, types, openAliases);
     case "Binary":
       if (["=", "<>", "<", "<=", ">", ">=", "&&", "||"].includes(expr.op)) return boolShape;
-      return inferSimpleType(expr.left, types).kind === "float" || inferSimpleType(expr.right, types).kind === "float" ? floatShape : intShape;
+      return inferSimpleType(expr.left, types, openAliases).kind === "float" || inferSimpleType(expr.right, types, openAliases).kind === "float" ? floatShape : intShape;
     case "Fun":
-      return { kind: "fn", result: inferSimpleType(expr.body, new Map([...types, ...expr.params.map((param): [string, ValueShape] => [param, unknownShape])])) };
+      return { kind: "fn", result: inferSimpleType(expr.body, new Map([...types, ...expr.params.map((param): [string, ValueShape] => [param, unknownShape])]), openAliases) };
     case "Unary":
-      return inferSimpleType(expr.expr, types).kind === "float" ? floatShape : intShape;
+      return inferSimpleType(expr.expr, types, openAliases).kind === "float" ? floatShape : intShape;
     case "Int":
       return intShape;
   }
 }
 
-function inferCallShape(expr: Extract<Expr, { kind: "Call" }>, types: Map<string, ValueShape>): ValueShape {
+function inferCallShape(expr: Extract<Expr, { kind: "Call" }>, types: Map<string, ValueShape>, openAliases = new Map<string, string>()): ValueShape {
   if (expr.callee.kind !== "Var") return intShape;
-  const name = expr.callee.name;
+  const name = types.has(expr.callee.name) ? expr.callee.name : openAliases.get(expr.callee.name) ?? expr.callee.name;
   if (name === "print" || name === "println" || name === "Array.set") return unitShape;
   if (name === "Float.of_int") return floatShape;
   if (name === "Float.to_int") return intShape;
   if (name === "to_string") return stringShape;
   if (name === "fst") {
-    const tuple = inferSimpleType(expr.args[0], types);
+    const tuple = inferSimpleType(expr.args[0], types, openAliases);
     return tuple.kind === "tuple" ? tuple.items[0] ?? unknownShape : unknownShape;
   }
   if (name === "snd") {
-    const tuple = inferSimpleType(expr.args[0], types);
+    const tuple = inferSimpleType(expr.args[0], types, openAliases);
     return tuple.kind === "tuple" ? tuple.items[1] ?? unknownShape : unknownShape;
   }
   if (name === "String.concat") return stringShape;
   if (name === "String.length") return intShape;
   if (name === "String.split") return { kind: "list", elem: stringShape };
-  if (name === "Array.make") return { kind: "array", elem: inferSimpleType(expr.args[1], types) };
+  if (name === "Array.make") return { kind: "array", elem: inferSimpleType(expr.args[1], types, openAliases) };
   if (name === "Array.map") {
-    const mapped = inferFunctionResultShape(inferSimpleType(expr.args[0], types));
+    const mapped = inferFunctionResultShape(inferSimpleType(expr.args[0], types, openAliases));
     return { kind: "array", elem: mapped };
   }
   if (name === "Array.get") {
-    const array = inferSimpleType(expr.args[0], types);
+    const array = inferSimpleType(expr.args[0], types, openAliases);
     return array.kind === "array" ? array.elem : unknownShape;
   }
   if (name === "Array.length") return intShape;
   if (name === "Array.iter") return unitShape;
-  if (name === "Array.fold_left") return inferSimpleType(expr.args[1], types);
+  if (name === "Array.fold_left") return inferSimpleType(expr.args[1], types, openAliases);
   if (name === "List.empty") return { kind: "list", elem: unknownShape };
-  if (name === "List.cons") return { kind: "list", elem: inferSimpleType(expr.args[0], types) };
+  if (name === "List.cons") return { kind: "list", elem: inferSimpleType(expr.args[0], types, openAliases) };
   if (name === "List.map") {
-    const mapped = inferFunctionResultShape(inferSimpleType(expr.args[0], types));
+    const mapped = inferFunctionResultShape(inferSimpleType(expr.args[0], types, openAliases));
     return { kind: "list", elem: mapped };
   }
   if (name === "List.head") {
-    const list = inferSimpleType(expr.args[0], types);
+    const list = inferSimpleType(expr.args[0], types, openAliases);
     return list.kind === "list" ? list.elem : unknownShape;
   }
   if (name === "List.tail") {
-    const list = inferSimpleType(expr.args[0], types);
+    const list = inferSimpleType(expr.args[0], types, openAliases);
     return list.kind === "list" ? list : { kind: "list", elem: unknownShape };
   }
   if (name === "List.length" || name === "List.is_empty") return intShape;
   if (name === "List.iter") return unitShape;
-  if (name === "List.fold_left") return inferSimpleType(expr.args[1], types);
+  if (name === "List.fold_left") return inferSimpleType(expr.args[1], types, openAliases);
   if (name === "Set.empty") return { kind: "set", elem: unknownShape };
-  if (name === "Set.add") return { kind: "set", elem: inferSimpleType(expr.args[1], types) };
+  if (name === "Set.add") return { kind: "set", elem: inferSimpleType(expr.args[1], types, openAliases) };
   if (name === "Set.has" || name === "Set.length") return intShape;
   if (name === "Map.empty") return { kind: "map", key: unknownShape, value: unknownShape };
-  if (name === "Map.set") return { kind: "map", key: inferSimpleType(expr.args[1], types), value: inferSimpleType(expr.args[2], types) };
+  if (name === "Map.set") return { kind: "map", key: inferSimpleType(expr.args[1], types, openAliases), value: inferSimpleType(expr.args[2], types, openAliases) };
   if (name === "Map.get") {
-    const map = inferSimpleType(expr.args[0], types);
+    const map = inferSimpleType(expr.args[0], types, openAliases);
     return map.kind === "map" ? map.value : unknownShape;
   }
   if (name === "Map.has") return intShape;
   const callee = types.get(name);
   if (callee?.kind === "fn" && (callee.result.kind === "int" || callee.result.kind === "unknown")) {
-    const argShapes = expr.args.map((arg) => inferSimpleType(arg, types));
+    const argShapes = expr.args.map((arg) => inferSimpleType(arg, types, openAliases));
     if (argShapes.some((shape) => shape.kind === "float")) return floatShape;
     if (argShapes.length > 0 && argShapes.every((shape) => shape.kind === "int")) return intShape;
   }
