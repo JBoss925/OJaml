@@ -426,6 +426,47 @@ test("arrays expose length, set, get, map, iter, and fold_left", async () => {
   assert.deepEqual(result.prints, [3, 5, 3]);
 });
 
+test("runtime checks reject invalid array access", async () => {
+  await assert.rejects(
+    () => runOJaml(`let main =
+  let xs = Array.make -1 0 in
+  Array.length xs`),
+    WebAssembly.RuntimeError,
+  );
+  await assert.rejects(
+    () => runOJaml(`let main =
+  let xs = Array.make 0 42 in
+  Array.get xs 0`),
+    WebAssembly.RuntimeError,
+  );
+  await assert.rejects(
+    () => runOJaml(`let main =
+  let xs = Array.make 1 42 in
+  Array.get xs (-1)`),
+    WebAssembly.RuntimeError,
+  );
+  await assert.rejects(
+    () => runOJaml(`let main =
+  let xs = Array.make 1 42 in
+  Array.get xs 1`),
+    WebAssembly.RuntimeError,
+  );
+  await assert.rejects(
+    () => runOJaml(`let main =
+  let xs = Array.make 1 42 in
+  Array.set xs 1 99`),
+    WebAssembly.RuntimeError,
+  );
+
+  const result = await runOJaml(`let main =
+  let empty = Array.make 0 42 in
+  let xs = Array.make 1 7 in
+  let _ = Array.set xs 0 8 in
+  Array.length empty + Array.get xs 0`);
+
+  assert.equal(result.value, 8);
+});
+
 test("polymorphic lists store strings", async () => {
   const result = await runOJaml(`let main =
   let xs = List.cons "tail" (List.empty ()) in
@@ -447,6 +488,27 @@ test("lists expose empty, cons, head, tail, is_empty, length, map, iter, and fol
 
   assert.equal(result.value, 11);
   assert.deepEqual(result.prints, [6, 3]);
+});
+
+test("runtime checks reject empty list head and tail", async () => {
+  await assert.rejects(
+    () => runOJaml(`let main =
+  let empty = List.tail (List.cons 1 (List.empty ())) in
+  List.head empty`),
+    WebAssembly.RuntimeError,
+  );
+  await assert.rejects(
+    () => runOJaml(`let main =
+  let empty = List.tail (List.cons 1 (List.empty ())) in
+  List.length (List.tail empty)`),
+    WebAssembly.RuntimeError,
+  );
+
+  const result = await runOJaml(`let main =
+  let xs = List.cons 2 (List.cons 1 (List.empty ())) in
+  List.head xs + List.head (List.tail xs)`);
+
+  assert.equal(result.value, 3);
 });
 
 test("polymorphic maps store string values", async () => {
@@ -481,6 +543,21 @@ test("maps use latest value for duplicate keys and support float values", async 
   Float.to_int (Map.get m "score" + 0.5)`);
 
   assert.equal(result.value, 3);
+});
+
+test("runtime checks reject missing map keys", async () => {
+  await assert.rejects(
+    () => runOJaml(`let main =
+  let m = Map.set (Map.empty ()) "present" 1 in
+  Map.get m "missing" + 1`),
+    WebAssembly.RuntimeError,
+  );
+
+  const result = await runOJaml(`let main =
+  let m = Map.set (Map.empty ()) "present" 1 in
+  if Map.has m "missing" then 0 else Map.get m "present"`);
+
+  assert.equal(result.value, 1);
 });
 
 test("polymorphic sets store strings and expose membership", async () => {

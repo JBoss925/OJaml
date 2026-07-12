@@ -32,8 +32,9 @@ This matrix tracks features currently implemented by the parser, checker, WASM b
 | `Set.empty/add/has/length` | yes | Sets |
 | Polymorphic maps | yes | Collections, Language Tour |
 | `Map.empty/set/get/has` | yes | Collections |
+| Runtime access checks for arrays/lists/maps | yes | test suite |
 | Monaco parser/type diagnostics | yes | editor |
 | Negative type diagnostics across primitives and stdlib calls | yes | test suite |
 | Exact editor-example output transcripts | yes | all examples |
 
-Not yet implemented: algebraic data type declarations, records, tuples, modules/import syntax, exceptions, pattern matching over list/array/set/map structure, garbage collection, and general runtime bounds checks.
+Not yet implemented: algebraic data type declarations, records, tuples, modules/import syntax, exceptions, pattern matching over list/array/set/map structure, garbage collection, and recoverable language-level runtime exceptions.
