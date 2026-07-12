@@ -12,7 +12,7 @@ OJaml is an OCaml-inspired language implemented in TypeScript and compiled to We
 - Browser editor/playground with Monaco completions, diagnostics, and hover metadata.
 - Node CLI for local compile/run workflows.
 - Reusable package exports for the editor component, examples, compiler, and runtime helpers.
-- Test suite covering parser, checker, runtime, stdlib, sequencing, closures, high-arity calls, tuples, records, algebraic data types, sets, maps, structural patterns, power, runtime access checks, exact editor-example transcripts, and compiler specialization regressions.
+- Test suite covering parser, checker, runtime, stdlib, sequencing, pipelines, closures, high-arity calls, tuples, records, algebraic data types, sets, maps, structural patterns, power, runtime access checks, exact editor-example transcripts, and compiler specialization regressions.
 
 ## Language Snapshot
 
@@ -38,6 +38,7 @@ Supported language features:
 - Record and algebraic data type declarations, including type parameters, plus value and function parameter annotations such as `let ada : person = ...` and `let describe (person : person) = ...`
 - Integer and float arithmetic, right-associative power `**`, comparison, equality, boolean, and integer `mod` operators
 - Sequencing with `expr; expr`; the left side must return `unit`, and the whole sequence has the right side's type
+- Forward pipelines with `value |> f`, equivalent to `f value`, including top-level functions, local closures, returned closures, and one-argument standard-library functions
 - Polymorphic functions, including constrained numeric variables displayed as `number -> number` and emitted with concrete int/float call-site specializations
 - `if ... then ... else`
 - OCaml-style `match ... with | pat -> expr`

@@ -46,6 +46,18 @@ test("parses sequence expressions without stealing record field separators", () 
   assert.equal(main.second.body.kind, "Sequence");
 });
 
+test("parses pipeline as a low-precedence left-associative operator", () => {
+  const ast = parse(`let main = 3 |> inc |> double + 1`);
+  const main = asLet(ast.declarations[0]).value;
+
+  assert.equal(main.kind, "Binary");
+  assert.equal(main.op, "|>");
+  assert.equal(main.left.kind, "Binary");
+  assert.equal(main.left.op, "|>");
+  assert.equal(main.right.kind, "Binary");
+  assert.equal(main.right.op, "+");
+});
+
 test("parses top-level recursive function", () => {
   const ast = parse(`let rec fact n = if n <= 1 then 1 else n * fact (n - 1)\nlet main = fact 5`);
   const fact = asLet(ast.declarations[0]);
@@ -587,6 +599,48 @@ test("sequence expressions require unit on the left side", () => {
     const markers = getOJamlSyntaxMarkers(source, 8);
     assert.equal(markers.length, 1, source);
     assert.match(markers[0].message, /Type mismatch/, source);
+  }
+});
+
+test("pipeline operator applies values to direct functions and stdlib functions", async () => {
+  const result = await runOJaml(`let inc x = x + 1
+let double x = x * 2
+let square x = x * x
+
+let main =
+  let int_result = 3 |> inc |> double in
+  let float_result = 2.5 |> square |> Float.to_int in
+  int_result + float_result`);
+
+  assert.equal(result.value, 14);
+});
+
+test("pipeline operator works with returned closures and opened stdlib names", async () => {
+  const result = await runOJaml(`open List
+open String
+
+let make_adder x = fun y -> x + y
+
+let main =
+  let words = split "typed pipelines work" " " in
+  let first_size = words |> head |> String.length in
+  let total = 5 |> make_adder 10 in
+  first_size + total + List.length words`);
+
+  assert.equal(result.value, 23);
+});
+
+test("pipeline operator rejects non-functions and wrong-arity targets", () => {
+  const cases = [
+    [`let main = 1 |> 2`, /Type mismatch/],
+    [`let pair a b = a + b\nlet main = 1 |> pair`, /Pipeline target expects 2 argument/],
+    [`let main = "x" |> Float.to_int`, /Type mismatch/],
+  ] as const;
+
+  for (const [source, message] of cases) {
+    const markers = getOJamlSyntaxMarkers(source, 8);
+    assert.equal(markers.length, 1, source);
+    assert.match(markers[0].message, message, source);
   }
 });
 
@@ -1770,6 +1824,7 @@ const expectedExampleResults: Map<string, { mainType: string; value: number; out
   ["strings", { mainType: "int", value: 11, output: "greeting = hello world\nwords = [hello, world]\nlength = 11\n" }],
   ["open-modules", { mainType: "int", value: 10, output: "words = [hello, OJaml]\nhead = hello\nnums = [1, 2]\n" }],
   ["sequencing", { mainType: "int", value: 3, output: "first\nsecond\nitems = [1, 2, 3]\n" }],
+  ["pipeline", { mainType: "int", value: 12, output: "nums = [1, 2, 3]\ntotal = 12\n" }],
   ["arrays", { mainType: "int", value: 60, output: "scores = [10, 20, 30]\nlength = 3\ntotal = 60\n" }],
   ["lists", { mainType: "int", value: 3, output: "items = [first, second, third]\nfirst = first\nrest = [second, third]\nlength = 3\n" }],
   ["maps", { mainType: "int", value: 1906, output: "years = { Grace: 1906, Ada: 1815 }\nAda = 1815\nGrace = found\n" }],

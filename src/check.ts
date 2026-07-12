@@ -646,6 +646,17 @@ function resolveVarType(expr: Extract<Expr, { kind: "Var" }>, globals: Map<strin
 }
 
 function checkBinary(expr: Extract<Expr, { kind: "Binary" }>, globals: Map<string, Binding>, locals: Map<string, Type>, context: CheckContext): Type {
+  if (expr.op === "|>") {
+    const valueType = checkExpr(expr.left, globals, locals, context);
+    const targetType = checkExpr(expr.right, globals, locals, context);
+    const resultType = typeVar();
+    const pruned = prune(targetType);
+    if (pruned.kind === "fn" && pruned.params.length !== 1) {
+      throw new OJamlError(`Pipeline target expects ${pruned.params.length} argument(s), got 1`, expr.span.start, expr.span.end);
+    }
+    unify(targetType, fn([valueType], resultType), expr.span);
+    return resultType;
+  }
   if (expr.op === "&&" || expr.op === "||") {
     unify(checkExpr(expr.left, globals, locals, context), boolType, expr.left.span);
     unify(checkExpr(expr.right, globals, locals, context), boolType, expr.right.span);

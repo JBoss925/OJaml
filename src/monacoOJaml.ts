@@ -48,7 +48,7 @@ export function configureOJamlMonaco(monaco: Monaco): void {
   monaco.languages.setMonarchTokensProvider(ojamlLanguageId, {
     defaultToken: "",
     keywords,
-    operators: ["+", "-", "*", "/", "**", "=", "<>", "<", "<=", ">", ">=", "&&", "||", "->"],
+    operators: ["+", "-", "*", "/", "**", "=", "<>", "<", "<=", ">", ">=", "&&", "||", "|>", "->"],
     tokenizer: {
       root: [
         [/\(\*/, "comment", "@comment"],
@@ -58,7 +58,7 @@ export function configureOJamlMonaco(monaco: Monaco): void {
         [/[a-zA-Z_][a-zA-Z0-9_'.]*/, { cases: { "@keywords": "keyword", "@default": "identifier" } }],
         [/\d+\.\d+/, "number.float"],
         [/\d+/, "number"],
-        [/->|\*\*|<>|<=|>=|&&|\|\||[+\-*/=<>.]/, "operator"],
+        [/->|\*\*|<>|<=|>=|&&|\|\||\|>|[+\-*/=<>.]/, "operator"],
         [/[(){};:]/, "delimiter"],
         [/\|/, "operator"],
       ],

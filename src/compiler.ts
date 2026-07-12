@@ -228,55 +228,7 @@ function emitExpr(expr: Expr, context: EmitContext): string {
   ${emitExpr(expr.body, context)}
 )`;
     case "Call":
-      if (expr.callee.kind === "Var" && context.constructors.has(expr.callee.name)) {
-        return emitVariantConstructor(context.constructors.get(expr.callee.name)!, expr.args[0], context);
-      }
-      if (expr.callee.kind === "Var" && (context.resolveName(expr.callee.name) === "print" || context.resolveName(expr.callee.name) === "println")) {
-        const argShape = context.exprType(expr.args[0]);
-        const calleeName = context.resolveName(expr.callee.name);
-        const newline = calleeName === "println" ? `\n  (call $print_string (i32.const ${context.strings.intern("\n")}))` : "";
-        if (argShape.kind === "string") {
-          return `(block (result i32)
-  (call $print_string ${emitExpr(expr.args[0], context)})${newline}
-  (i32.const 0)
-)`;
-        }
-        if (argShape.kind === "float") {
-          return `(block (result i32)
-  (call $print_f64 (call $unbox_float ${emitExpr(expr.args[0], context)}))${newline}
-  (i32.const 0)
-)`;
-        }
-        return `(block (result i32)
-  (call $print_i32 ${emitExpr(expr.args[0], context)})${newline}
-  (i32.const 0)
-)`;
-      }
-      if (expr.callee.kind === "Var" && context.resolveName(expr.callee.name) === "to_string") {
-        const arg = expr.args[0];
-        return `(call $host_to_string ${emitExpr(arg, context)} (i32.const ${context.strings.intern(typeDescriptor(context.exprType(arg)))}))`;
-      }
-      if (expr.callee.kind === "Var" && (context.resolveName(expr.callee.name) === "fst" || context.resolveName(expr.callee.name) === "snd")) {
-        const offset = context.resolveName(expr.callee.name) === "fst" ? 4 : 8;
-        return `(i32.load (i32.add ${emitExpr(expr.args[0], context)} (i32.const ${offset})))`;
-      }
-      if (expr.callee.kind === "Var" && (context.resolveName(expr.callee.name) === "Set.add" || context.resolveName(expr.callee.name) === "Set.has")) {
-        const calleeName = context.resolveName(expr.callee.name);
-        const elementShape = context.exprType(expr.args[1]);
-        const helper = elementShape.kind === "float"
-          ? `${calleeName}.float`
-          : calleeName;
-        return `(call $${safe(helper)} ${expr.args.map((arg) => emitExpr(arg, context)).join(" ")})`;
-      }
-      if (expr.callee.kind === "Var" && (context.locals.has(expr.callee.name) || context.captured.has(expr.callee.name))) {
-        return emitIndirectCall(expr.callee, expr.args, context);
-      }
-      if (expr.callee.kind === "Var" && context.globals.has(context.resolveName(expr.callee.name))) {
-        const calleeName = context.resolveName(expr.callee.name);
-        const specialization = topLevelSpecializations.get(calleeName)?.get(callShapeKey(expr.args.map((arg) => context.exprType(arg))));
-        return `(call $${safe(specialization ?? calleeName)} ${expr.args.map((arg) => emitExpr(arg, context)).join(" ")})`;
-      }
-      return emitIndirectCall(expr.callee, expr.args, context);
+      return emitCall(expr.callee, expr.args, context);
     case "Fun":
       return emitClosure(expr, context);
     case "Match": {
@@ -287,6 +239,58 @@ function emitExpr(expr: Expr, context: EmitContext): string {
 )`;
     }
   }
+}
+
+function emitCall(callee: Expr, args: Expr[], context: EmitContext): string {
+  if (callee.kind === "Var" && context.constructors.has(callee.name)) {
+    return emitVariantConstructor(context.constructors.get(callee.name)!, args[0], context);
+  }
+  if (callee.kind === "Var" && (context.resolveName(callee.name) === "print" || context.resolveName(callee.name) === "println")) {
+    const argShape = context.exprType(args[0]);
+    const calleeName = context.resolveName(callee.name);
+    const newline = calleeName === "println" ? `\n  (call $print_string (i32.const ${context.strings.intern("\n")}))` : "";
+    if (argShape.kind === "string") {
+      return `(block (result i32)
+  (call $print_string ${emitExpr(args[0], context)})${newline}
+  (i32.const 0)
+)`;
+    }
+    if (argShape.kind === "float") {
+      return `(block (result i32)
+  (call $print_f64 (call $unbox_float ${emitExpr(args[0], context)}))${newline}
+  (i32.const 0)
+)`;
+    }
+    return `(block (result i32)
+  (call $print_i32 ${emitExpr(args[0], context)})${newline}
+  (i32.const 0)
+)`;
+  }
+  if (callee.kind === "Var" && context.resolveName(callee.name) === "to_string") {
+    const arg = args[0];
+    return `(call $host_to_string ${emitExpr(arg, context)} (i32.const ${context.strings.intern(typeDescriptor(context.exprType(arg)))}))`;
+  }
+  if (callee.kind === "Var" && (context.resolveName(callee.name) === "fst" || context.resolveName(callee.name) === "snd")) {
+    const offset = context.resolveName(callee.name) === "fst" ? 4 : 8;
+    return `(i32.load (i32.add ${emitExpr(args[0], context)} (i32.const ${offset})))`;
+  }
+  if (callee.kind === "Var" && (context.resolveName(callee.name) === "Set.add" || context.resolveName(callee.name) === "Set.has")) {
+    const calleeName = context.resolveName(callee.name);
+    const elementShape = context.exprType(args[1]);
+    const helper = elementShape.kind === "float"
+      ? `${calleeName}.float`
+      : calleeName;
+    return `(call $${safe(helper)} ${args.map((arg) => emitExpr(arg, context)).join(" ")})`;
+  }
+  if (callee.kind === "Var" && (context.locals.has(callee.name) || context.captured.has(callee.name))) {
+    return emitIndirectCall(callee, args, context);
+  }
+  if (callee.kind === "Var" && context.globals.has(context.resolveName(callee.name))) {
+    const calleeName = context.resolveName(callee.name);
+    const specialization = topLevelSpecializations.get(calleeName)?.get(callShapeKey(args.map((arg) => context.exprType(arg))));
+    return `(call $${safe(specialization ?? calleeName)} ${args.map((arg) => emitExpr(arg, context)).join(" ")})`;
+  }
+  return emitIndirectCall(callee, args, context);
 }
 
 function emitTuple(expr: Extract<Expr, { kind: "Tuple" }>, context: EmitContext): string {
@@ -331,6 +335,7 @@ function emitVariantConstructor(constructor: ConstructorInfo, payload?: Expr, co
 }
 
 function emitBinary(expr: Extract<Expr, { kind: "Binary" }>, context: EmitContext): string {
+  if (expr.op === "|>") return emitCall(expr.right, [expr.left], context);
   const leftShape = context.exprType(expr.left);
   const rightShape = context.exprType(expr.right);
   const isFloat = leftShape.kind === "float" || rightShape.kind === "float";
@@ -930,6 +935,13 @@ function collectTopLevelCallHints(program: Program, globalTypes: Map<string, Val
       });
       hints.set(expr.callee.name, existing);
     }
+    if (expr.kind === "Binary" && expr.op === "|>" && expr.right.kind === "Var" && declarations.has(expr.right.name)) {
+      const existing = hints.get(expr.right.name) ?? [];
+      const shape = inferSimpleType(expr.left, new Map([...globalTypes, ...localTypes]), openAliases);
+      if (shape.kind === "float") existing[0] = floatShape;
+      if (shape.kind === "int" && !existing[0]) existing[0] = intShape;
+      hints.set(expr.right.name, existing);
+    }
     switch (expr.kind) {
       case "LetIn": {
         const nested = new Map(localTypes);
@@ -1124,6 +1136,7 @@ function inferSimpleType(expr: Expr, types: Map<string, ValueShape>, openAliases
       return inferSimpleType(expr.arms[0].body, types, openAliases);
     case "Binary":
       if (["=", "<>", "<", "<=", ">", ">=", "&&", "||"].includes(expr.op)) return boolShape;
+      if (expr.op === "|>") return inferFunctionResultShape(inferSimpleType(expr.right, types, openAliases));
       return inferSimpleType(expr.left, types, openAliases).kind === "float" || inferSimpleType(expr.right, types, openAliases).kind === "float" ? floatShape : intShape;
     case "Fun":
       return { kind: "fn", result: inferSimpleType(expr.body, new Map([...types, ...expr.params.map((param): [string, ValueShape] => [param, unknownShape])]), openAliases) };
@@ -1331,6 +1344,7 @@ function countCalls(expr: Expr): number {
     case "Unary":
       return countCalls(expr.expr);
     case "Binary":
+      if (expr.op === "|>") return 1 + countCalls(expr.left) + countCalls(expr.right);
       return countCalls(expr.left) + countCalls(expr.right);
     case "Sequence":
       return countCalls(expr.first) + countCalls(expr.second);

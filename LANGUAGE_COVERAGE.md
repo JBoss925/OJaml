@@ -17,6 +17,7 @@ This matrix tracks features currently implemented by the parser, checker, WASM b
 | String escapes | yes | test suite |
 | Integer and float arithmetic, power, comparison, boolean, unary operators | yes | Language Tour |
 | Sequencing with `expr; expr` and unit-checking for the left side | yes | Sequencing |
+| Forward pipeline operator `|>` | yes | Pipeline |
 | Polymorphic functions and int/float specialization | yes | Type Inference |
 | Function application | yes | all nontrivial examples |
 | First-class functions, including high-arity function values | yes | Higher Order, High-Arity Functions |

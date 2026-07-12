@@ -550,6 +550,7 @@ class Parser {
   }
 
   private precedence(op: BinaryOp): number {
+    if (op === "|>") return 0;
     if (op === "||") return 1;
     if (op === "&&") return 2;
     if (["=", "<>", "<", "<=", ">", ">="].includes(op)) return 3;

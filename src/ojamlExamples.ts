@@ -95,6 +95,22 @@ let main =
   List.length items`,
   },
   {
+    id: "pipeline",
+    title: "Pipeline",
+    source: `let double_all xs =
+  List.map (fun x -> x * 2) xs
+
+let sum xs =
+  List.fold_left (fun total x -> total + x) 0 xs
+
+let main =
+  let nums = List.cons 1 (List.cons 2 (List.cons 3 (List.empty ()))) in
+  let total = nums |> double_all |> sum in
+  println (String.concat "nums = " (to_string nums));
+  println (String.concat "total = " (to_string total));
+  total`,
+  },
+  {
     id: "arrays",
     title: "Arrays",
     source: `let main =
