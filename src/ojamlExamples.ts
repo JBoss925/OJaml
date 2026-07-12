@@ -180,6 +180,26 @@ let main =
   ada.year + List.length people`,
   },
   {
+    id: "variants",
+    title: "Algebraic Data Types",
+    source: `type status = Pending | Done of int | Failed of string
+
+let score status =
+  match status with
+  | Pending -> 0
+  | Done value -> value
+  | Failed message -> String.length message
+
+let main =
+  let pending = score Pending in
+  let done = score (Done 42) in
+  let failed = score (Failed "oops") in
+  let _ = println (String.concat "pending = " (to_string pending)) in
+  let _ = println (String.concat "done = " (to_string done)) in
+  let _ = println (String.concat "failed = " (to_string failed)) in
+  pending + done + failed`,
+  },
+  {
     id: "type-inference",
     title: "Type Inference",
     source: `let square x = x ** 2
@@ -209,22 +229,21 @@ let main =
   {
     id: "high-arity-functions",
     title: "High-Arity Functions",
-    source: `let apply6 f =
-  f 1 2 3 4 5 6
+    source: `type person = { name: string; year: int }
 
-let make_offset a b c =
-  fun d e f g -> a + b + c + d + e + f + g
+let apply8 f =
+  f "Ada" 1815 2.5 true (List.cons 4 (List.empty ())) { name = "Grace"; year = 1906 } (fun x -> x + 1) 3
 
 let main =
-  let sum6 a b c d e f = a + b + c + d + e + f in
-  let direct = sum6 1 2 3 4 5 6 in
-  let through_value = apply6 sum6 in
-  let add_more = make_offset 10 20 30 in
-  let returned = add_more 1 2 3 4 in
-  let _ = println (String.concat "direct = " (to_string direct)) in
-  let _ = println (String.concat "through value = " (to_string through_value)) in
-  let _ = println (String.concat "returned closure = " (to_string returned)) in
-  direct + through_value + returned`,
+  let combine name (year : int) (scale : float) active (values : int list) (person : person) inc seed =
+    let flag = if active then 10 else 0 in
+    String.length name + year + Float.to_int scale + flag + List.head values + person.year + inc seed
+  in
+  let result = apply8 combine in
+  let _ = println (String.concat "values = " (to_string (List.cons 4 (List.empty ())))) in
+  let _ = println (String.concat "person = " (to_string { name = "Grace"; year = 1906 })) in
+  let _ = println (String.concat "result = " (to_string result)) in
+  result`,
   },
   {
     id: "pattern-matching",

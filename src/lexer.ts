@@ -31,7 +31,7 @@ export type Token = {
   end: number;
 };
 
-const keywords = new Set(["let", "rec", "in", "if", "then", "else", "true", "false", "fun", "match", "with", "mod", "type"]);
+const keywords = new Set(["let", "rec", "in", "if", "then", "else", "true", "false", "fun", "match", "with", "mod", "type", "of"]);
 const symbolicOperators = new Set(["+", "-", "*", "/", "**", "<", ">", "<=", ">=", "<>", "&&", "||"]);
 
 export function lex(source: string): Token[] {

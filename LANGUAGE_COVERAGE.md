@@ -11,7 +11,7 @@ This matrix tracks features currently implemented by the parser, checker, WASM b
 | Integers, floats, booleans, strings, unit | yes | Hello, Language Tour |
 | Tuple expressions | yes | Tuples |
 | Structural record expressions and field access | yes | Records |
-| Record type declarations plus value and function parameter annotations | yes | Records |
+| Record and algebraic data type declarations plus value and function parameter annotations | yes | Records, Algebraic Data Types |
 | Tuple projection with `.0`, `.1`, ... plus pair helpers `fst`/`snd` | yes | Tuples |
 | String escapes | yes | test suite |
 | Integer and float arithmetic, power, comparison, boolean, unary operators | yes | Language Tour |
@@ -22,7 +22,7 @@ This matrix tracks features currently implemented by the parser, checker, WASM b
 | Top-level functions passed as values | yes | test suite |
 | `if ... then ... else ...` | yes | Basics |
 | `match ... with` | yes | Factorial, Language Tour |
-| Int/float/string/bool/unit/tuple/record/list/array/set/map/wildcard/variable patterns | yes | Pattern Matching, Records, Arrays, Sets, Collections |
+| Int/float/string/bool/unit/tuple/record/list/array/set/map/constructor/wildcard/variable patterns | yes | Pattern Matching, Records, Arrays, Sets, Collections, Algebraic Data Types |
 | `print : int|float|string -> unit` | yes | test suite |
 | `println : int|float|string -> unit` | yes | examples |
 | `to_string : 'a -> string` | yes | examples |
@@ -42,4 +42,4 @@ This matrix tracks features currently implemented by the parser, checker, WASM b
 | Negative type diagnostics across primitives and stdlib calls | yes | test suite |
 | Exact editor-example output transcripts | yes | all examples |
 
-Not yet implemented: algebraic data type declarations, modules/import syntax, exceptions, garbage collection, and recoverable language-level runtime exceptions.
+Not yet implemented: polymorphic algebraic data type parameters, modules/import syntax, exceptions, garbage collection, and recoverable language-level runtime exceptions.

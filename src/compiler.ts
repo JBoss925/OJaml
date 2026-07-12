@@ -16,6 +16,13 @@ type LambdaInfo = {
   captures: string[];
 };
 
+type ConstructorInfo = {
+  name: string;
+  typeName: string;
+  tag: number;
+  hasPayload: boolean;
+};
+
 let lambdaInfos: LambdaInfo[] = [];
 let nextLambdaId = 0;
 let nextTableIndex = 0;
@@ -30,6 +37,7 @@ export function compile(source: string): CompileResult {
 
 export function emitWat(program: Program, checkedSymbols: CheckedSymbol[] = [], checkedTokens: CheckedToken[] = []): string {
   const declarations = letDeclarations(program);
+  const constructors = collectConstructorInfos(program);
   lambdaInfos = [];
   nextLambdaId = 0;
   nextTableIndex = 0;
@@ -56,10 +64,10 @@ export function emitWat(program: Program, checkedSymbols: CheckedSymbol[] = [], 
   }
   const emittedDeclarations = declarations.map((declaration) => {
     const checkedLocals = new Map(symbolTypes.locals.get(declaration.name));
-    return emitDeclaration(declaration, globals, globalTypes, strings, checkedLocals, tokenTypes);
+    return emitDeclaration(declaration, globals, globalTypes, strings, checkedLocals, tokenTypes, constructors);
   }).join("\n\n");
-  const specializedDeclarations = emitTopLevelSpecializations(program, globals, globalTypes, strings, tokenTypes);
-  const lambdas = emitPendingLambdas(globals, globalTypes, strings, tokenTypes);
+  const specializedDeclarations = emitTopLevelSpecializations(program, globals, globalTypes, strings, tokenTypes, constructors);
+  const lambdas = emitPendingLambdas(globals, globalTypes, strings, tokenTypes, constructors);
   const dataSegments = strings.emitDataSegments();
   const tableEntries = [
     ...topLevelWrapperNames.map((name) => `$__closure_${safe(name)}`),
@@ -100,6 +108,7 @@ function emitDeclaration(
   strings: StringPool,
   checkedLocals = new Map<string, ValueShape>(),
   tokenTypes = new Map<string, ValueShape>(),
+  constructors = new Map<string, ConstructorInfo>(),
   nameOverride = declaration.name,
 ): string {
   const params = declaration.params.map((param) => `(param $${safe(param)} i32)`).join(" ");
@@ -107,7 +116,7 @@ function emitDeclaration(
   for (const param of declaration.params) locals.add(param);
   const localTypes = collectLocalTypes(declaration, globalTypes, checkedLocals);
   const localLines = [...locals].filter((name) => !declaration.params.includes(name)).map((name) => `  (local $${safe(name)} i32)`);
-  const body = emitExpr(declaration.value, new EmitContext(globals, locals, localTypes, globalTypes, strings, tokenTypes));
+  const body = emitExpr(declaration.value, new EmitContext(globals, locals, localTypes, globalTypes, strings, tokenTypes, constructors));
   const head = `(func $${safe(nameOverride)} ${params}${params ? " " : ""}(result i32)`;
   return [head, ...localLines, indent(body, 2), ")"].join("\n");
 }
@@ -124,6 +133,7 @@ class EmitContext {
     readonly globalTypes: Map<string, ValueShape>,
     readonly strings: StringPool,
     readonly tokenTypes = new Map<string, ValueShape>(),
+    readonly constructors = new Map<string, ConstructorInfo>(),
     readonly captured = new Map<string, number>(),
   ) {}
 
@@ -176,6 +186,7 @@ function emitExpr(expr: Expr, context: EmitContext): string {
       return recordField(emitExpr(expr.record, context), index);
     }
     case "Var":
+      if (context.constructors.has(expr.name) && !context.constructors.get(expr.name)!.hasPayload) return emitVariantConstructor(context.constructors.get(expr.name)!);
       if (context.locals.has(expr.name)) return `(local.get $${safe(expr.name)})`;
       if (context.captured.has(expr.name)) return `(i32.load (i32.add (local.get $__env) (i32.const ${4 + context.captured.get(expr.name)! * 4})))`;
       if (context.globals.get(expr.name) === 0) return `(call $${safe(expr.name)})`;
@@ -202,6 +213,9 @@ function emitExpr(expr: Expr, context: EmitContext): string {
   ${emitExpr(expr.body, context)}
 )`;
     case "Call":
+      if (expr.callee.kind === "Var" && context.constructors.has(expr.callee.name)) {
+        return emitVariantConstructor(context.constructors.get(expr.callee.name)!, expr.args[0], context);
+      }
       if (expr.callee.kind === "Var" && (expr.callee.name === "print" || expr.callee.name === "println")) {
         const argShape = context.exprType(expr.args[0]);
         const newline = expr.callee.name === "println" ? `\n  (call $print_string (i32.const ${context.strings.intern("\n")}))` : "";
@@ -277,6 +291,24 @@ function emitRecord(expr: Extract<Expr, { kind: "Record" }>, context: EmitContex
   (i32.store (local.get $${local}) (i32.const ${fields.length}))
   ${stores}
   (local.get $${local})
+)`;
+}
+
+function emitVariantConstructor(constructor: ConstructorInfo, payload?: Expr, context?: EmitContext): string {
+  if (constructor.hasPayload) {
+    if (!payload || !context) throw new Error(`Constructor ${constructor.name} requires a payload`);
+    const local = context.nextTupleLocal();
+    return `(block (result i32)
+  (local.set $${local} (call $alloc (i32.const 8)))
+  (i32.store (local.get $${local}) (i32.const ${constructor.tag}))
+  (i32.store (i32.add (local.get $${local}) (i32.const 4)) ${emitExpr(payload, context)})
+  (local.get $${local})
+)`;
+  }
+  return `(block (result i32)
+  (local.set $__variant (call $alloc (i32.const 4)))
+  (i32.store (local.get $__variant) (i32.const ${constructor.tag}))
+  (local.get $__variant)
 )`;
 }
 
@@ -386,6 +418,12 @@ function emitPatternTest(pattern: Pattern, value: string, context: EmitContext):
       return emitLinkedSetPatternTest(pattern.items, value, context);
     case "PMap":
       return emitLinkedMapPatternTest(pattern.entries, value, context);
+    case "PConstructor": {
+      const constructor = context.constructors.get(pattern.name);
+      if (!constructor) return `(i32.const 0)`;
+      const tagTest = `(i32.and (i32.ne ${value} (i32.const 0)) (i32.eq (i32.load ${value}) (i32.const ${constructor.tag})))`;
+      return pattern.payload ? `(i32.and ${tagTest} ${emitPatternTest(pattern.payload, variantPayload(value), context)})` : tagTest;
+    }
     case "PListNil":
       return `(i32.eqz ${value})`;
     case "PListCons":
@@ -427,6 +465,9 @@ function emitPatternBindings(pattern: Pattern, value: string): string {
       ])
       .filter(Boolean)
       .join("\n  ");
+  }
+  if (pattern.kind === "PConstructor" && pattern.payload) {
+    return emitPatternBindings(pattern.payload, variantPayload(value));
   }
   if (pattern.kind === "PListCons") {
     return [
@@ -511,6 +552,10 @@ function linkedMapValue(value: string): string {
 
 function linkedMapTail(value: string): string {
   return `(i32.load (i32.add ${value} (i32.const 8)))`;
+}
+
+function variantPayload(value: string): string {
+  return `(i32.load (i32.add ${value} (i32.const 4)))`;
 }
 
 function emitIndirectCall(callee: Expr, args: Expr[], context: EmitContext): string {
@@ -601,6 +646,7 @@ function emitPendingLambdas(
   globalTypes: Map<string, ValueShape>,
   strings: StringPool,
   tokenTypes = new Map<string, ValueShape>(),
+  constructors = new Map<string, ConstructorInfo>(),
 ): string {
   const emitted: string[] = [];
   let cursor = 0;
@@ -615,7 +661,7 @@ function emitPendingLambdas(
       .filter((name) => !lambda.params.includes(name))
       .map((name) => `  (local $${safe(name)} i32)`);
     const params = lambda.params.map((param) => `(param $${safe(param)} i32)`).join(" ");
-    const body = emitExpr(lambda.body, new EmitContext(globals, locals, localTypes, globalTypes, strings, tokenTypes, captured));
+    const body = emitExpr(lambda.body, new EmitContext(globals, locals, localTypes, globalTypes, strings, tokenTypes, constructors, captured));
     emitted.push([`(func $__lambda_${lambda.id} (param $__env i32) ${params} (result i32)`, ...localLines, indent(body, 2), ")"].join("\n"));
   }
   return emitted.join("\n\n");
@@ -624,22 +670,23 @@ function emitPendingLambdas(
 function collectLocals(declaration: Declaration): Set<string> {
   const locals = new Set<string>();
   locals.add("__closure");
-  addCallScratchLocals(locals);
+  locals.add("__variant");
+  addCallScratchLocals(locals, countCalls(declaration.value));
   addTupleScratchLocals(locals);
   walk(declaration.value, locals, { matchId: 0 });
   return locals;
 }
 
 function collectLocalsFromExpr(expr: Expr): Set<string> {
-  const locals = new Set<string>(["__closure"]);
-  addCallScratchLocals(locals);
+  const locals = new Set<string>(["__closure", "__variant"]);
+  addCallScratchLocals(locals, countCalls(expr));
   addTupleScratchLocals(locals);
   walk(expr, locals, { matchId: 0 });
   return locals;
 }
 
-function addCallScratchLocals(locals: Set<string>): void {
-  for (let i = 0; i < 16; i++) locals.add(`__callee${i}`);
+function addCallScratchLocals(locals: Set<string>, count: number): void {
+  for (let i = 0; i < count; i++) locals.add(`__callee${i}`);
 }
 
 function addTupleScratchLocals(locals: Set<string>): void {
@@ -663,6 +710,22 @@ const unknownShape: ValueShape = { kind: "unknown" };
 
 function letDeclarations(program: Program): Declaration[] {
   return program.declarations.filter((declaration): declaration is Declaration => declaration.kind === "Let");
+}
+
+function collectConstructorInfos(program: Program): Map<string, ConstructorInfo> {
+  const constructors = new Map<string, ConstructorInfo>();
+  for (const declaration of program.declarations) {
+    if (declaration.kind !== "Type" || declaration.body.kind !== "Variant") continue;
+    declaration.body.constructors.forEach((constructor, tag) => {
+      constructors.set(constructor.name, {
+        name: constructor.name,
+        typeName: declaration.name,
+        tag,
+        hasPayload: constructor.payload !== undefined,
+      });
+    });
+  }
+  return constructors;
 }
 
 function collectLocalTypes(declaration: Declaration, globalTypes: Map<string, ValueShape>, checkedLocals = new Map<string, ValueShape>()): Map<string, ValueShape> {
@@ -908,6 +971,7 @@ function emitTopLevelSpecializations(
   globalTypes: Map<string, ValueShape>,
   strings: StringPool,
   tokenTypes = new Map<string, ValueShape>(),
+  constructors = new Map<string, ConstructorInfo>(),
 ): string {
   const declarations = new Map(letDeclarations(program).map((declaration) => [declaration.name, declaration]));
   const emitted: string[] = [];
@@ -917,7 +981,7 @@ function emitTopLevelSpecializations(
     for (const [key, specializedName] of variants) {
       const shapes = key.split(",").map((shape) => shape === "float" ? floatShape : intShape);
       const checkedLocals = new Map(declaration.params.map((param, index): [string, ValueShape] => [param, shapes[index] ?? intShape]));
-      emitted.push(emitDeclaration(declaration, globals, globalTypes, strings, checkedLocals, tokenTypes, specializedName));
+      emitted.push(emitDeclaration(declaration, globals, globalTypes, strings, checkedLocals, tokenTypes, constructors, specializedName));
     }
   }
   return emitted.join("\n\n");
@@ -1208,6 +1272,40 @@ function freeVars(expr: Expr, bound: Set<string>): Set<string> {
   return result;
 }
 
+function countCalls(expr: Expr): number {
+  switch (expr.kind) {
+    case "Call":
+      return 1 + countCalls(expr.callee) + expr.args.reduce((sum, arg) => sum + countCalls(arg), 0);
+    case "Unary":
+      return countCalls(expr.expr);
+    case "Binary":
+      return countCalls(expr.left) + countCalls(expr.right);
+    case "Tuple":
+      return expr.items.reduce((sum, item) => sum + countCalls(item), 0);
+    case "TupleAccess":
+      return countCalls(expr.tuple);
+    case "Record":
+      return expr.fields.reduce((sum, field) => sum + countCalls(field.value), 0);
+    case "FieldAccess":
+      return countCalls(expr.record);
+    case "If":
+      return countCalls(expr.condition) + countCalls(expr.thenBranch) + countCalls(expr.elseBranch);
+    case "LetIn":
+      return countCalls(expr.value) + countCalls(expr.body);
+    case "Fun":
+      return countCalls(expr.body);
+    case "Match":
+      return countCalls(expr.expr) + expr.arms.reduce((sum, arm) => sum + countCalls(arm.body), 0);
+    case "Int":
+    case "Float":
+    case "String":
+    case "Bool":
+    case "Unit":
+    case "Var":
+      return 0;
+  }
+}
+
 function addPatternLocals(pattern: Pattern, locals: Set<string>): void {
   if (pattern.kind === "PVar") {
     locals.add(pattern.name);
@@ -1223,6 +1321,7 @@ function addPatternLocals(pattern: Pattern, locals: Set<string>): void {
       addPatternLocals(entry.value, locals);
     });
   }
+  if (pattern.kind === "PConstructor" && pattern.payload) addPatternLocals(pattern.payload, locals);
   if (pattern.kind === "PListCons") {
     addPatternLocals(pattern.head, locals);
     addPatternLocals(pattern.tail, locals);
@@ -1244,6 +1343,7 @@ function addPatternBoundNames(pattern: Pattern, bound: Set<string>): void {
       addPatternBoundNames(entry.value, bound);
     });
   }
+  if (pattern.kind === "PConstructor" && pattern.payload) addPatternBoundNames(pattern.payload, bound);
   if (pattern.kind === "PListCons") {
     addPatternBoundNames(pattern.head, bound);
     addPatternBoundNames(pattern.tail, bound);

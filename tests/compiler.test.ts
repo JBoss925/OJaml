@@ -101,6 +101,25 @@ let main = ada.year`);
   assert.equal(asLet(ast.declarations[2]).paramAnnotations[0]?.kind, "TName");
 });
 
+test("parses algebraic data type declarations and constructor patterns", () => {
+  const ast = parse(`type status = Pending | Done of int | Failed of string
+
+let main =
+  match Done 42 with
+  | Pending -> 0
+  | Done value -> value
+  | Failed message -> String.length message`);
+  const typeDeclaration = ast.declarations[0];
+  const main = asLet(ast.declarations[1]);
+
+  assert.equal(typeDeclaration.kind, "Type");
+  assert.equal(typeDeclaration.body.kind, "Variant");
+  assert.equal(typeDeclaration.body.constructors.length, 3);
+  assert.equal(typeDeclaration.body.constructors[1].payload?.kind, "TName");
+  assert.equal(main.value.kind, "Match");
+  assert.equal(main.value.arms[1].pattern.kind, "PConstructor");
+});
+
 test("parses empty and cons list patterns as right-associative patterns", () => {
   const ast = parse(`let main =
   match List.empty () with
@@ -246,6 +265,48 @@ test("local recursive closures support arities above three", async () => {
   weighted 4 10 20 30`);
 
   assert.equal(result.value, 84);
+});
+
+test("high-arity calls pass heap values, floats, bools, and functions", async () => {
+  const result = await runOJaml(`type person = { name: string; year: int }
+
+let apply8 f =
+  f "Ada" 1815 2.5 true (List.cons 4 (List.empty ())) { name = "Grace"; year = 1906 } (fun x -> x + 1) 3
+
+let main =
+  let combine name (year : int) (scale : float) active (values : int list) (person : person) inc seed =
+    let flag = if active then 10 else 0 in
+    String.length name + year + Float.to_int scale + flag + List.head values + person.year + inc seed
+  in
+  apply8 combine`);
+
+  assert.equal(result.value, 3744);
+});
+
+test("first-class calls allocate scratch locals beyond the old fixed pool", async () => {
+  const result = await runOJaml(`let main =
+  let add a b c d = a + b + c + d in
+  let f = add in
+  let a0 = f 1 2 3 4 in
+  let a1 = f 1 2 3 4 in
+  let a2 = f 1 2 3 4 in
+  let a3 = f 1 2 3 4 in
+  let a4 = f 1 2 3 4 in
+  let a5 = f 1 2 3 4 in
+  let a6 = f 1 2 3 4 in
+  let a7 = f 1 2 3 4 in
+  let a8 = f 1 2 3 4 in
+  let a9 = f 1 2 3 4 in
+  let a10 = f 1 2 3 4 in
+  let a11 = f 1 2 3 4 in
+  let a12 = f 1 2 3 4 in
+  let a13 = f 1 2 3 4 in
+  let a14 = f 1 2 3 4 in
+  let a15 = f 1 2 3 4 in
+  let a16 = f 1 2 3 4 in
+  a0 + a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8 + a9 + a10 + a11 + a12 + a13 + a14 + a15 + a16`);
+
+  assert.equal(result.value, 170);
 });
 
 test("emits indirect function table types for the maximum program arity", () => {
@@ -1010,6 +1071,83 @@ test("record type declarations reject duplicate, unknown, and mismatched shapes"
   }
 });
 
+test("algebraic data types construct and match nullary and payload constructors", async () => {
+  const result = await runOJaml(`type status = Pending | Done of int | Failed of string
+
+let score status =
+  match status with
+  | Pending -> 0
+  | Done value -> value
+  | Failed message -> String.length message
+
+let main =
+  let _ = println (score Pending) in
+  let _ = println (score (Failed "oops")) in
+  score (Done 42)`);
+
+  assert.equal(result.value, 42);
+  assert.equal(result.output, "0\n4\n");
+});
+
+test("algebraic data type payloads support records, tuples, collections, and closures", async () => {
+  const result = await runOJaml(`type person = { name: string; year: int }
+type event = Empty | Person of person | Pair of (string, int) | Scores of int list
+
+let describe event =
+  match event with
+  | Empty -> 0
+  | Person person -> person.year
+  | Pair (_, value) -> value
+  | Scores scores ->
+      let add = fun offset -> List.length scores + offset in
+      add 10
+
+let main =
+  let ada : person = { name = "Ada"; year = 1815 } in
+  let scores = List.cons 1 (List.cons 2 (List.empty ())) in
+  describe (Person ada) + describe (Pair ("x", 5)) + describe (Scores scores)`);
+
+  assert.equal(result.value, 1832);
+});
+
+test("algebraic data type constructor coverage can make a match exhaustive", async () => {
+  const exhaustive = await runOJaml(`type light = Red | Yellow | Green
+
+let main =
+  match Yellow with
+  | Red -> 1
+  | Yellow -> 2
+  | Green -> 3`);
+  const nonExhaustive = getOJamlSyntaxMarkers(`type light = Red | Yellow | Green
+
+let main =
+  match Yellow with
+  | Red -> 1
+  | Yellow -> 2`, 8);
+
+  assert.equal(exhaustive.value, 2);
+  assert.equal(nonExhaustive.length, 1);
+  assert.match(nonExhaustive[0].message, /catch-all/);
+});
+
+test("algebraic data types reject bad constructors and payload mismatches", () => {
+  const cases = [
+    `type status = Pending | Done of int\ntype other = Pending\nlet main = 0`,
+    `type status = pending | Done\nlet main = 0`,
+    `type status = Pending | Done of int\nlet main = Done "forty"`,
+    `type status = Pending | Done of int\nlet main = Done`,
+    `type status = Pending | Done of int\nlet main = Done 1 2`,
+    `type status = Pending | Done of int\nlet main = match Done 1 with | Done -> 1 | _ -> 0`,
+    `type status = Pending | Done of int\nlet main = match Pending with | Pending value -> value | _ -> 0`,
+    `type status = Pending | Done of int\nlet main = match Pending with | Missing -> 0 | _ -> 1`,
+    `type status = Pending | Done of int\ntype other = Other\nlet main = match Pending with | Other -> 0 | _ -> 1`,
+  ];
+
+  for (const source of cases) {
+    assert.ok(getOJamlSyntaxMarkers(source, 8).length > 0, source);
+  }
+});
+
 test("fst and snd project pair elements with precise types", async () => {
   const result = await runOJaml(`let main =
   let point = (3, 4) in
@@ -1464,9 +1602,10 @@ const expectedExampleResults: Map<string, { mainType: string; value: number; out
   ["sets", { mainType: "int", value: 2, output: "names = { Grace, Ada }\nhas Ada = true\n" }],
   ["tuples", { mainType: "int", value: 9, output: "point = (3, 4, 5)\nx = 3\ny = 4\nz = 5\nx + y = 7\nlabeled = (origin, (3, 4, 5))\npoints = [(3, 4, 5), (0, 0, 0)]\n" }],
   ["records", { mainType: "int", value: 1817, output: "ada = { active = true; name = Ada; year = 1815 }\nada.name = Ada\nlabel = Ada 1815\npeople = [{ active = true; name = Ada; year = 1815 }, { active = true; name = Grace; year = 1906 }]\n" }],
+  ["variants", { mainType: "int", value: 46, output: "pending = 0\ndone = 42\nfailed = 4\n" }],
   ["type-inference", { mainType: "int", value: 87, output: "square 9 = 81\nsquare 2.5 = 6.25\n" }],
   ["local-recursion", { mainType: "int", value: 15, output: "values = [4, 5, 6]\nsum = 15\n" }],
-  ["high-arity-functions", { mainType: "int", value: 112, output: "direct = 21\nthrough value = 21\nreturned closure = 70\n" }],
+  ["high-arity-functions", { mainType: "int", value: 3744, output: "values = [4]\nperson = { name = Grace; year = 1906 }\nresult = 3744\n" }],
   ["pattern-matching", { mainType: "unit", value: 0, output: "many\none\none point five\nother\n3,4\nfirst Ada\nset has Grace then Ada\nGrace born 1906\n" }],
   ["factorial", { mainType: "int", value: 720, output: "720\n" }],
   ["fibonacci", { mainType: "int", value: 55, output: "55\n" }],
@@ -1703,6 +1842,27 @@ test("checker exposes set and map pattern locals for hovers", () => {
   assert.equal(mainLocals.get("first"), "first : int");
   assert.equal(mainLocals.get("name"), "name : string");
   assert.equal(mainLocals.get("year"), "year : int");
+});
+
+test("checker exposes algebraic data type constructor and payload types for hovers", () => {
+  const source = `type status = Pending | Done of int | Failed of string
+
+let main =
+  match Done 42 with
+  | Pending -> 0
+  | Done value -> value
+  | Failed message -> String.length message`;
+  const checked = check(parse(source));
+  const symbols = new Map(checked.symbols.map((symbol) => [symbol.name, symbol.detail]));
+  const mainLocals = new Map(checked.symbols.find((symbol) => symbol.name === "main")?.locals?.map((symbol) => [symbol.name, symbol.detail]));
+  const doneToken = checked.tokens.find((token) => token.name === "Done");
+
+  assert.equal(symbols.get("Pending"), "Pending : status");
+  assert.equal(symbols.get("Done"), "Done : int -> status");
+  assert.equal(symbols.get("Failed"), "Failed : string -> status");
+  assert.equal(doneToken?.detail, "Done : int -> status");
+  assert.equal(mainLocals.get("value"), "value : int");
+  assert.equal(mainLocals.get("message"), "message : string");
 });
 
 test("checker exposes local let rec function types for hovers", () => {

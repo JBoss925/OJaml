@@ -27,6 +27,21 @@ class Parser {
     const start = this.expectKeyword("type").start;
     const nameToken = this.expect("ident", "Expected type name after type");
     this.expect("equals", "Expected '=' in type declaration");
+    if (!this.at("lbrace")) {
+      const constructors: Array<{ name: string; nameSpan: { start: number; end: number }; payload?: TypeExpr }> = [];
+      do {
+        this.match("pipe");
+        const constructor = this.expect("ident", "Expected variant constructor name");
+        if (!/^[A-Z]/.test(constructor.text)) {
+          throw new OJamlError("Variant constructor names must start with an uppercase letter", constructor.start, constructor.end);
+        }
+        const payload = this.matchKeyword("of") ? this.parseTypeExpr() : undefined;
+        constructors.push({ name: constructor.text, nameSpan: { start: constructor.start, end: constructor.end }, payload });
+      } while (this.at("pipe"));
+      if (constructors.length === 0) throw new OJamlError("Expected variant constructor", nameToken.end, nameToken.end);
+      this.ensureUniqueFields(constructors.map((constructor) => constructor.name), start, this.previous().end);
+      return { kind: "Type", name: nameToken.text, nameSpan: { start: nameToken.start, end: nameToken.end }, body: { kind: "Variant", constructors }, span: { start, end: this.previous().end } };
+    }
     this.expect("lbrace", "Expected record type body");
     const fields: Array<{ name: string; nameSpan: { start: number; end: number }; type: TypeExpr }> = [];
     if (!this.at("rbrace")) {
@@ -38,7 +53,7 @@ class Parser {
     }
     this.expect("rbrace", "Expected '}' in type declaration");
     this.ensureUniqueFields(fields.map((field) => field.name), start, this.previous().end);
-    return { kind: "Type", name: nameToken.text, nameSpan: { start: nameToken.start, end: nameToken.end }, fields, span: { start, end: this.previous().end } };
+    return { kind: "Type", name: nameToken.text, nameSpan: { start: nameToken.start, end: nameToken.end }, body: { kind: "Record", fields }, span: { start, end: this.previous().end } };
   }
 
   private parseDeclaration(): Declaration {
@@ -114,6 +129,18 @@ class Parser {
   }
 
   private parseTypeExpr(): TypeExpr {
+    let type = this.parseTypeAtom();
+    while (this.at("ident") && ["array", "list", "set", "map"].includes(this.peek().text)) {
+      const token = this.advance();
+      const name = token.text as "array" | "list" | "set" | "map";
+      const args = name === "map" && type.kind === "TTuple" && type.items.length === 2 ? type.items : [type];
+      if (name === "map" && args.length !== 2) throw new OJamlError("Map type expects a pair type such as (string, int) map", token.start, token.end);
+      type = { kind: "TApp", name, args, span: { start: type.span.start, end: token.end } };
+    }
+    return type;
+  }
+
+  private parseTypeAtom(): TypeExpr {
     const token = this.peek();
     if (this.match("ident")) return { kind: "TName", name: token.text, span: { start: token.start, end: token.end } };
     if (this.match("lparen")) {
@@ -221,6 +248,10 @@ class Parser {
     if (this.matchKeyword("false")) return { kind: "PBool", value: false, span: { start: token.start, end: token.end } };
     if (this.match("ident")) {
       if (token.text === "_") return { kind: "PWildcard", span: { start: token.start, end: token.end } };
+      if (/^[A-Z]/.test(token.text)) {
+        const payload = this.canStartAtomicPattern() ? this.parseAtomicPattern() : undefined;
+        return { kind: "PConstructor", name: token.text, nameSpan: { start: token.start, end: token.end }, payload, span: { start: token.start, end: payload?.span.end ?? token.end } };
+      }
       return { kind: "PVar", name: token.text, span: { start: token.start, end: token.end } };
     }
     if (this.match("lbrace")) {
@@ -271,6 +302,13 @@ class Parser {
       return pattern;
     }
     throw new OJamlError("Expected pattern", token.start, token.end);
+  }
+
+  private canStartAtomicPattern(): boolean {
+    if (this.at("int") || this.at("float") || this.at("string") || this.at("ident") || this.at("lbrace") || this.at("lbracket") || this.at("lparen")) return true;
+    if (this.at("operator", "-")) return true;
+    if (this.at("keyword", "true") || this.at("keyword", "false")) return true;
+    return false;
   }
 
   private parseCollectionPattern(start: number): Pattern {

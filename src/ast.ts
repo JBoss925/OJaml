@@ -13,13 +13,16 @@ export type TypeDeclaration = {
   kind: "Type";
   name: string;
   nameSpan: SourceSpan;
-  fields: Array<{ name: string; nameSpan: SourceSpan; type: TypeExpr }>;
+  body:
+    | { kind: "Record"; fields: Array<{ name: string; nameSpan: SourceSpan; type: TypeExpr }> }
+    | { kind: "Variant"; constructors: Array<{ name: string; nameSpan: SourceSpan; payload?: TypeExpr }> };
   span: SourceSpan;
 };
 
 export type TypeExpr =
   | { kind: "TName"; name: string; span: SourceSpan }
   | { kind: "TTuple"; items: TypeExpr[]; span: SourceSpan }
+  | { kind: "TApp"; name: "array" | "list" | "set" | "map"; args: TypeExpr[]; span: SourceSpan }
   | { kind: "TRecord"; fields: Array<{ name: string; nameSpan: SourceSpan; type: TypeExpr }>; span: SourceSpan };
 
 export type Declaration = {
@@ -73,6 +76,7 @@ export type Pattern =
   | { kind: "PArray"; items: Pattern[]; span: SourceSpan }
   | { kind: "PSet"; items: Pattern[]; span: SourceSpan }
   | { kind: "PMap"; entries: Array<{ key: Pattern; value: Pattern }>; span: SourceSpan }
+  | { kind: "PConstructor"; name: string; nameSpan: SourceSpan; payload?: Pattern; span: SourceSpan }
   | { kind: "PListNil"; span: SourceSpan }
   | { kind: "PListCons"; head: Pattern; tail: Pattern; span: SourceSpan }
   | { kind: "PWildcard"; span: SourceSpan }

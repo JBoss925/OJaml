@@ -33,13 +33,13 @@ Supported language features:
 - `let` and `let rec` top-level bindings
 - Local `let ... in ...`, local function bindings, and local `let rec` function bindings
 - Anonymous functions and first-class function values, including high-arity function values
-- Integers, floats, booleans, strings, unit, tuples, and structural records
-- Record type declarations plus value and function parameter annotations such as `let ada : person = ...` and `let describe (person : person) = ...`
+- Integers, floats, booleans, strings, unit, tuples, structural records, and non-generic algebraic data types
+- Record and algebraic data type declarations plus value and function parameter annotations such as `let ada : person = ...` and `let describe (person : person) = ...`
 - Integer and float arithmetic, right-associative power `**`, comparison, equality, boolean, and integer `mod` operators
 - Polymorphic functions, including constrained numeric variables displayed as `number -> number` and emitted with concrete int/float call-site specializations
 - `if ... then ... else`
 - OCaml-style `match ... with | pat -> expr`
-- Wildcard, int, float, string, bool, unit, tuple, record, list, fixed-length array, set, map, and variable patterns
+- Wildcard, int, float, string, bool, unit, tuple, record, list, fixed-length array, set, map, constructor, and variable patterns
 - Zero-based tuple projection with `.0`, `.1`, ... plus pair helpers `fst` and `snd`
 - Polymorphic arrays, lists, sets, maps, tuples and records in heap-backed values, and higher-order collection functions
 - `print : int|float|string -> unit`
@@ -98,9 +98,9 @@ All standard-library functions have explicit type schemes so editor hovers, type
 
 Tuple projection uses zero-based postfix indexes: `point.0`, `point.1`, and so on. The checker verifies the receiver is a tuple and rejects indexes outside the tuple arity before emission. `fst` and `snd` remain available as pair-specific helpers.
 
-Record type declarations use `type person = { name: string; year: int }`. Annotated values such as `let ada : person = { name = "Ada"; year = 1815 }` and annotated function parameters such as `let describe (person : person) = person.name` are checked against the named record shape, then lower to the same structural record layout as unannotated records. Field layout is sorted by label at compile time, so source field order does not affect access, matching, or formatting.
+Record type declarations use `type person = { name: string; year: int }`. Algebraic data type declarations use forms such as `type status = Pending | Done of int | Failed of string`. Annotated values such as `let ada : person = { name = "Ada"; year = 1815 }` and annotated function parameters such as `let describe (person : person) = person.name` are checked against the named type, then lower to the same runtime layouts as unannotated values. Type annotations support primitives, named record/variant types, tuples, inline records, and postfix collection forms such as `int list`, `person array`, `string set`, and `(string, int) map`. Record field layout is sorted by label at compile time, so source field order does not affect access, matching, or formatting.
 
-Pattern matching supports primitive literals, unit, wildcard/variable catch-alls, tuple structure, record structure, list structure with `[]` and `head :: tail`, fixed-length array structure with `[| ... |]`, set structure with `{| item; item |}`, and map structure with `{| key: value; key: value |}`. Empty maps use `{| : |}` so they stay distinct from empty sets. Tuple, record, list, array, set, and map patterns may bind nested values and mix literals with binders. Array, set, and map patterns match exact stored lengths, while list empty/cons coverage and catch-all patterns remain the conservative route for exhaustive matches.
+Pattern matching supports primitive literals, unit, wildcard/variable catch-alls, tuple structure, record structure, list structure with `[]` and `head :: tail`, fixed-length array structure with `[| ... |]`, set structure with `{| item; item |}`, map structure with `{| key: value; key: value |}`, and constructors such as `Done value`. Empty maps use `{| : |}` so they stay distinct from empty sets. Tuple, record, list, array, set, map, and constructor patterns may bind nested values and mix literals with binders. Array, set, and map patterns match exact stored lengths. List empty/cons coverage, complete constructor coverage, and catch-all patterns remain the conservative route for exhaustive matches.
 
 ## Prerequisites
 
