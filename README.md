@@ -11,7 +11,8 @@ OJaml is an OCaml-inspired language implemented in TypeScript and compiled to We
 - WebAssembly text backend using a uniform `i32` value representation plus concrete int/float specializations for polymorphic functions.
 - Browser editor/playground with Monaco completions, diagnostics, and hover metadata.
 - Node CLI for local compile/run workflows.
-- Test suite covering parser, checker, runtime, stdlib, closures, exact editor-example transcripts, and compiler specialization regressions.
+- Reusable package exports for the editor component, examples, compiler, and runtime helpers.
+- Test suite covering parser, checker, runtime, stdlib, closures, sets, power, exact editor-example transcripts, and compiler specialization regressions.
 
 ## Language Snapshot
 
@@ -42,21 +43,54 @@ Supported language features:
 - `print : int|float|string -> unit`
 - `println : int|float|string -> unit`
 - `to_string : 'a -> string`, including recursive formatting for arrays, lists, sets, maps, and functions
+- `main` must be a zero-argument value and may return `int`, `float`, `bool`, or `unit` directly. Strings and heap values should be printed, converted with `to_string`, or reduced to a direct result type.
 
 ## Standard Library Surface
 
-- `Array.make`, `Array.length`, `Array.get`, `Array.set`
-- `Array.map`, `Array.iter`, `Array.fold_left`
-- `Float.of_int`, `Float.to_int`
-- `print`, `println`
-- `to_string`
-- `String.concat`, `String.length`, `String.split`
-- `List.empty`, `List.cons`, `List.head`, `List.tail`, `List.is_empty`, `List.length`
-- `List.map`, `List.iter`, `List.fold_left`
-- `Set.empty`, `Set.add`, `Set.has`, `Set.length`
-- `Map.empty`, `Map.set`, `Map.get`, `Map.has`
+```text
+print : int|float|string -> unit
+println : int|float|string -> unit
+to_string : 'a -> string
+
+Float.of_int : int -> float
+Float.to_int : float -> int
+
+String.concat : string -> string -> string
+String.length : string -> int
+String.split : string -> string -> string list
+
+Array.make : int -> 'a -> 'a array
+Array.length : 'a array -> int
+Array.get : 'a array -> int -> 'a
+Array.set : 'a array -> int -> 'a -> unit
+Array.map : ('a -> 'b) -> 'a array -> 'b array
+Array.iter : ('a -> unit) -> 'a array -> unit
+Array.fold_left : ('b -> 'a -> 'b) -> 'b -> 'a array -> 'b
+
+List.empty : unit -> 'a list
+List.cons : 'a -> 'a list -> 'a list
+List.head : 'a list -> 'a
+List.tail : 'a list -> 'a list
+List.is_empty : 'a list -> bool
+List.length : 'a list -> int
+List.map : ('a -> 'b) -> 'a list -> 'b list
+List.iter : ('a -> unit) -> 'a list -> unit
+List.fold_left : ('b -> 'a -> 'b) -> 'b -> 'a list -> 'b
+
+Set.empty : unit -> 'a set
+Set.add : 'a set -> 'a -> 'a set
+Set.has : 'a set -> 'a -> bool
+Set.length : 'a set -> int
+
+Map.empty : unit -> ('k, 'v) map
+Map.set : ('k, 'v) map -> 'k -> 'v -> ('k, 'v) map
+Map.get : ('k, 'v) map -> 'k -> 'v
+Map.has : ('k, 'v) map -> 'k -> bool
+```
 
 All standard-library functions have explicit type schemes so editor hovers, type errors, and autocomplete remain statically meaningful.
+
+`print` appends text directly to the captured output stream; `println` appends a trailing newline. `to_string` formats primitives, arrays, lists, sets, maps, and functions. Unknown heap-backed values fall back to `Object <ptr>`, and function values format as `Function <ptr>`.
 
 ## Prerequisites
 
@@ -81,6 +115,12 @@ Compile and run an example through the CLI:
 
 ```bash
 npm run cli -- examples/factorial.oj --run
+```
+
+Compile an example to WebAssembly text without running it:
+
+```bash
+npm run cli -- examples/factorial.oj
 ```
 
 Run the test suite:
@@ -125,9 +165,28 @@ tests/                Node test suite
 examples/             CLI-friendly source examples
 ```
 
+## Package Exports
+
+```ts
+import {
+  OJamlEditor,
+  ojamlExamples,
+  compile,
+  emitWat,
+  runOJaml,
+  compileWatToWasm,
+} from "ojaml";
+
+import "ojaml/styles.css";
+```
+
+`compile(source)` parses, checks, and emits WebAssembly text. `runOJaml(source)` compiles, instantiates, runs `main`, and returns `{ value, mainType, wat, prints, output }`. `OJamlEditor` is the React/Monaco playground component used by the website.
+
 ## Runtime Model
 
-The WebAssembly backend uses a uniform `i32` representation. Integers and booleans are immediate values; heap-backed values such as floats, strings, arrays, lists, sets, maps, and closures are represented as pointers. Float arithmetic and power unbox operands to `f64`; `int ** int` returns an int, while any float operand makes `**` return a boxed float. Polymorphic top-level functions receive concrete int/float specializations when call sites require different runtime representations. The checker is responsible for rejecting invalid programs before emission.
+The WebAssembly backend uses a uniform `i32` representation. Integers and booleans are immediate values; unit is zero; heap-backed values such as floats, strings, arrays, lists, sets, maps, and closures are represented as pointers. Float arithmetic and power unbox operands to `f64`; `int ** int` returns an int, while any float operand makes `**` return a boxed float. Polymorphic top-level functions receive concrete int/float specializations when call sites require different runtime representations. The checker is responsible for rejecting invalid programs before emission.
+
+Current runtime limits are intentional: allocation is bump-pointer based, there is no garbage collector, and collection helpers do not provide general bounds or null safety checks.
 
 ## Troubleshooting
 

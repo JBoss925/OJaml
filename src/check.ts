@@ -85,7 +85,7 @@ export function check(program: Program): CheckResult {
 
   const mainType = prune(globals.get("main")!.type);
   if (!isRuntimeMainType(mainType)) {
-    throw new OJamlError(`Program 'main' cannot return ${showType(mainType)} directly; print it or return int, bool, or unit`, 0, 0);
+    throw new OJamlError(`Program 'main' cannot return ${showType(mainType)} directly; print it or return int, float, bool, or unit`, 0, 0);
   }
   return { mainType: mainType.name, symbols: collectCheckedSymbols(program, globals), tokens: finalizeTokens(context.tokens) };
 }
