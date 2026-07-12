@@ -107,6 +107,12 @@ class Parser {
 
   private parsePattern(): Pattern {
     const token = this.peek();
+    if (this.match("operator", "-")) {
+      const valueToken = this.peek();
+      if (this.match("int")) return { kind: "PInt", value: -Number(valueToken.text), span: { start: token.start, end: valueToken.end } };
+      if (this.match("float")) return { kind: "PFloat", value: -Number(valueToken.text), span: { start: token.start, end: valueToken.end } };
+      throw new OJamlError("Expected numeric literal after '-' in pattern", token.start, token.end);
+    }
     if (this.match("int")) return { kind: "PInt", value: Number(token.text), span: { start: token.start, end: token.end } };
     if (this.match("float")) return { kind: "PFloat", value: Number(token.text), span: { start: token.start, end: token.end } };
     if (this.match("string")) return { kind: "PString", value: token.text, span: { start: token.start, end: token.end } };
@@ -140,13 +146,24 @@ class Parser {
   private parseApplication(): Expr {
     let expr = this.parseUnary();
     const args: Expr[] = [];
-    while (this.canStartAtom()) args.push(this.parseUnary());
+    while (this.canStartApplicationArg(args.length)) args.push(this.parseUnary());
     if (args.length === 0) return expr;
     return { kind: "Call", callee: expr, args, span: { start: expr.span.start, end: args[args.length - 1].span.end } };
   }
 
   private parseUnary(): Expr {
     if (this.at("operator", "-")) {
+      const token = this.peek();
+      const next = this.tokens[this.index + 1];
+      const afterNumber = this.tokens[this.index + 2];
+      if (next && (next.kind === "int" || next.kind === "float") && token.end === next.start && !(afterNumber?.kind === "operator" && afterNumber.text === "**")) {
+        this.advance();
+        this.advance();
+        const atom: Expr = next.kind === "int"
+          ? { kind: "Int", value: Number(next.text), span: { start: next.start, end: next.end } }
+          : { kind: "Float", value: Number(next.text), span: { start: next.start, end: next.end } };
+        return { kind: "Unary", op: "-", expr: atom, span: { start: token.start, end: next.end } };
+      }
       const start = this.advance().start;
       const expr = this.parseBinary(this.precedence("**"));
       return { kind: "Unary", op: "-", expr, span: { start, end: expr.span.end } };
@@ -193,6 +210,15 @@ class Parser {
     if (token.kind === "keyword" && ["true", "false"].includes(token.text)) return true;
     if (token.kind === "keyword" && expressionTerminators.has(token.text)) return false;
     return false;
+  }
+
+  private canStartApplicationArg(argCount: number): boolean {
+    const token = this.peek();
+    const next = this.tokens[this.index + 1];
+    if (argCount === 0 && token.kind === "operator" && token.text === "-" && next && (next.kind === "int" || next.kind === "float") && token.end === next.start) {
+      return true;
+    }
+    return this.canStartAtom();
   }
 
   private expectKeyword(text: string): Token {

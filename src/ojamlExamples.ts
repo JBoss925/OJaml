@@ -207,7 +207,7 @@ let cube_root n =
 
 let main =
   let positive = cube_root 512.0 in
-  let negative = cube_root (0.0 - 27.0) in
+  let negative = cube_root -27.0 in
   let _ = println (String.concat "cube_root 512 = " (to_string positive)) in
   let _ = println (String.concat "cube_root -27 = " (to_string negative)) in
   positive + negative`,

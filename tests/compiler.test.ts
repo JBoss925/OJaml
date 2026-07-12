@@ -92,7 +92,7 @@ test("power operator covers zero, negative bases, fractional exponents, and unar
   const result = await runOJaml(`let main =
   let zero_exp = 9 ** 0 in
   let zero_base = 0 ** 3 in
-  let negative_base = (0 - 2) ** 3 in
+  let negative_base = (-2) ** 3 in
   let unary_precedence = -2 ** 2 in
   let grouped_unary = (-2) ** 2 in
   let fractional = 27.0 ** (1.0 / 3.0) in
@@ -103,9 +103,65 @@ test("power operator covers zero, negative bases, fractional exponents, and unar
   assert.equal(result.output, "fractional = 3\n");
 });
 
+test("unary minus parses as the first function argument without stealing binary subtraction", async () => {
+  const result = await runOJaml(`let id x = x
+let sub a b = a - b
+
+let main =
+  let a = id -27 in
+  let b = id -2.5 in
+  let c = sub 10 3 - 2 in
+  let d = (fun x -> x + 1) -4 in
+  let _ = println (String.concat "b = " (to_string b)) in
+  a + Float.to_int b + c + d`);
+
+  assert.equal(result.value, -27);
+  assert.equal(result.output, "b = -2.5\n");
+});
+
+test("negative values work as direct stdlib and collection arguments", async () => {
+  const result = await runOJaml(`let main =
+  let first = Float.to_int -2.5 in
+  let ints = Array.make 2 (-1) in
+  let _ = Array.set ints 1 (-5) in
+  let floats = List.cons -2.5 (List.cons (-3.5) (List.empty ())) in
+  let set = Set.add (Set.add (Set.empty ()) (-4)) (-4) in
+  let map = Map.set (Map.empty ()) (-7) "seven" in
+  let _ = println (to_string ints) in
+  let _ = println (to_string floats) in
+  let _ = println (to_string set) in
+  let _ = println (Map.get map (-7)) in
+  first + Array.get ints 0 + Array.get ints 1 + Float.to_int (List.head floats) + Set.length set`);
+
+  assert.equal(result.value, -9);
+  assert.equal(result.output, "[-1, -5]\n[-2.5, -3.5]\n{ -4 }\nseven\n");
+});
+
+test("negative literals work in int and float match patterns", async () => {
+  const result = await runOJaml(`let classify_int n =
+  match n with
+  | -1 -> "minus one"
+  | 0 -> "zero"
+  | _ -> "other"
+
+let classify_float n =
+  match n with
+  | -2.5 -> "minus two point five"
+  | 0.0 -> "zero"
+  | _ -> "other"
+
+let main =
+  let _ = println (classify_int -1) in
+  let _ = println (classify_float -2.5) in
+  0`);
+
+  assert.equal(result.value, 0);
+  assert.equal(result.output, "minus one\nminus two point five\n");
+});
+
 test("negative float base with fractional exponent produces NaN", async () => {
   const result = await runOJaml(`let main =
-  let value = (0.0 - 4.0) ** 0.5 in
+  let value = (-4.0) ** 0.5 in
   let _ = println (to_string value) in
   value`);
 
@@ -296,7 +352,7 @@ let cube_root n =
 
 let main =
   let positive = cube_root 512.0 in
-  let negative = cube_root (0.0 - 27.0) in
+  let negative = cube_root -27.0 in
   let _ = println (to_string positive) in
   let _ = println (to_string negative) in
   positive + negative`);
