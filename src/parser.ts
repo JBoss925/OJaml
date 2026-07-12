@@ -418,6 +418,11 @@ class Parser {
   }
 
   private parseUnary(): Expr {
+    if (this.matchKeyword("not")) {
+      const start = this.previous().start;
+      const expr = this.parseUnary();
+      return { kind: "Unary", op: "not", expr, span: { start, end: expr.span.end } };
+    }
     if (this.at("operator", "-")) {
       const token = this.peek();
       const next = this.tokens[this.index + 1];

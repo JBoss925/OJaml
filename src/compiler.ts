@@ -203,6 +203,7 @@ function emitExpr(expr: Expr, context: EmitContext): string {
       if (context.globals.has(expr.name)) return emitTopLevelClosure(functionValueName(expr.name, context.exprType(expr)));
       return `(local.get $${safe(expr.name)})`;
     case "Unary":
+      if (expr.op === "not") return `(i32.eqz ${emitExpr(expr.expr, context)})`;
       if (context.exprType(expr.expr).kind === "float") return `(call $box_float (f64.neg (call $unbox_float ${emitExpr(expr.expr, context)})))`;
       return `(i32.sub (i32.const 0) ${emitExpr(expr.expr, context)})`;
     case "Binary":
@@ -1141,6 +1142,7 @@ function inferSimpleType(expr: Expr, types: Map<string, ValueShape>, openAliases
     case "Fun":
       return { kind: "fn", result: inferSimpleType(expr.body, new Map([...types, ...expr.params.map((param): [string, ValueShape] => [param, unknownShape])]), openAliases) };
     case "Unary":
+      if (expr.op === "not") return boolShape;
       return inferSimpleType(expr.expr, types, openAliases).kind === "float" ? floatShape : intShape;
     case "Int":
       return intShape;

@@ -58,6 +58,18 @@ test("parses pipeline as a low-precedence left-associative operator", () => {
   assert.equal(main.right.op, "+");
 });
 
+test("parses not as a unary boolean operator", () => {
+  const ast = parse(`let main = not false && not (1 = 2)`);
+  const main = asLet(ast.declarations[0]).value;
+
+  assert.equal(main.kind, "Binary");
+  assert.equal(main.op, "&&");
+  assert.equal(main.left.kind, "Unary");
+  assert.equal(main.left.op, "not");
+  assert.equal(main.right.kind, "Unary");
+  assert.equal(main.right.op, "not");
+});
+
 test("parses top-level recursive function", () => {
   const ast = parse(`let rec fact n = if n <= 1 then 1 else n * fact (n - 1)\nlet main = fact 5`);
   const fact = asLet(ast.declarations[0]);
@@ -297,6 +309,22 @@ let main =
   assert.equal(result.value, 36);
 });
 
+test("first-class functions support large arities without falling back to numeric-only arguments", async () => {
+  const result = await runOJaml(`type person = { name: string; year: int }
+
+let apply16 f =
+  f 1 "two" 3.0 true (List.cons 5 (List.empty ())) { name = "Ada"; year = 1815 } (fun x -> x + 7) "pair" 10 11 12 13 14 15 16 17
+
+let main =
+  let combine a b c d e (person : person) inc pair j k l m n o p q =
+    let flag = if d then 100 else 0 in
+    a + String.length b + Float.to_int c + flag + List.head e + person.year + inc 1 + String.length pair + j + k + l + m + n + o + p + q
+  in
+  apply16 combine`);
+
+  assert.equal(result.value, 2047);
+});
+
 test("returned closures support arities above three", async () => {
   const result = await runOJaml(`let make_offset a b c =
   fun d e f g h -> a + b + c + d + e + f + g + h
@@ -306,6 +334,17 @@ let main =
   add_more 4 5 6 7 8`);
 
   assert.equal(result.value, 36);
+});
+
+test("staged closures can curry into another high-arity function", async () => {
+  const result = await runOJaml(`let make_stage a b c =
+  fun d e f g h i j k l -> a + b + c + d + e + f + g + h + i + j + k + l
+
+let main =
+  let f = make_stage 1 2 3 in
+  f 4 5 6 7 8 9 10 11 12`);
+
+  assert.equal(result.value, 78);
 });
 
 test("local recursive closures support arities above three", async () => {
@@ -378,11 +417,36 @@ test("runs every arithmetic, comparison, boolean, and unary operator", async () 
   let a = 20 / 5 in
   let b = 17 mod 5 in
   let c = -3 in
-  if (a = 4) && (b <> 1) && (c < 0) && (a <= 4) && (b > 1) && (b >= 2) || false
+  if (a = 4) && (b <> 1) && (c < 0) && (a <= 4) && (b > 1) && (b >= 2) && not false || false
   then a + b * 10 - c
   else 0`);
 
   assert.equal(result.value, 27);
+});
+
+test("not works with booleans, comparisons, conditionals, and double negation", async () => {
+  const result = await runOJaml(`let main =
+  let closed = false in
+  let count = 3 in
+  let ready = not closed && not (count = 0) in
+  if not (not ready) then 1 else 0`);
+
+  assert.equal(result.mainType, "int");
+  assert.equal(result.value, 1);
+});
+
+test("not rejects non-boolean operands", () => {
+  const cases = [
+    `let main = not 1`,
+    `let main = not "ready"`,
+    `let main = not (List.empty ())`,
+  ];
+
+  for (const source of cases) {
+    const markers = getOJamlSyntaxMarkers(source, 8);
+    assert.equal(markers.length, 1, source);
+    assert.match(markers[0].message, /Type mismatch/, source);
+  }
 });
 
 test("numeric operators cover int, float, and mixed operand combinations", async () => {
@@ -1821,6 +1885,7 @@ const expectedExampleResults: Map<string, { mainType: string; value: number; out
   ["bindings", { mainType: "int", value: 1815, output: "name = Ada\nyear = 1815\nactive = true\n" }],
   ["integer-operators", { mainType: "int", value: 30, output: "10 + 4 = 14\nsum - 3 = 11\ndifference * 2 = 22\nproduct / 5 = 4\nproduct mod 5 = 2\n2 ** 3 = 8\n" }],
   ["float-operators", { mainType: "float", value: 14, output: "7.5 + 2.5 = 10\na - 1 = 9\nb * 2.0 = 18\nc / 3 = 6\n2.0 ** 3 = 8\n" }],
+  ["boolean-logic", { mainType: "int", value: 3, output: "closed = false\nready = true\n" }],
   ["strings", { mainType: "int", value: 11, output: "greeting = hello world\nwords = [hello, world]\nlength = 11\n" }],
   ["open-modules", { mainType: "int", value: 10, output: "words = [hello, OJaml]\nhead = hello\nnums = [1, 2]\n" }],
   ["sequencing", { mainType: "int", value: 3, output: "first\nsecond\nitems = [1, 2, 3]\n" }],

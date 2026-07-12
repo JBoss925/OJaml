@@ -7,7 +7,7 @@ OJaml is an OCaml-inspired language implemented in TypeScript and compiled to We
 - Lexer and recursive-descent parser for an OCaml-like syntax.
 - Static checks for bindings, calls, branches, pattern matches, and standard-library usage.
 - Polymorphic type inference for functions and collection builtins.
-- First-class functions and closures with captured locals and generated arity-specific indirect calls.
+- First-class functions and closures with captured locals and generated indirect-call types for every arity used by the program.
 - WebAssembly text backend using a uniform `i32` value representation plus concrete int/float specializations for polymorphic functions.
 - Browser editor/playground with Monaco completions, diagnostics, and hover metadata.
 - Node CLI for local compile/run workflows.
@@ -33,7 +33,7 @@ Supported language features:
 - `let` and `let rec` top-level bindings
 - Top-level `open` declarations for built-in standard-library namespaces: `Array`, `Float`, `List`, `Map`, `Set`, and `String`
 - Local `let ... in ...`, local function bindings, and local `let rec` function bindings
-- Anonymous functions and first-class function values, including high-arity function values
+- Anonymous functions and first-class function values, including high-arity function values and staged closures that return more high-arity functions
 - Integers, floats, booleans, strings, unit, tuples, structural records, and algebraic data types
 - Record and algebraic data type declarations, including type parameters, plus value and function parameter annotations such as `let ada : person = ...` and `let describe (person : person) = ...`
 - Integer and float arithmetic, right-associative power `**`, comparison, equality, boolean, and integer `mod` operators
@@ -210,7 +210,7 @@ import "ojaml/styles.css";
 
 ## Runtime Model
 
-The WebAssembly backend uses a uniform `i32` representation. Integers and booleans are immediate values; unit is zero; heap-backed values such as floats, strings, tuples, records, arrays, lists, sets, maps, and closures are represented as pointers. Tuple and record blocks store their element count followed by one `i32` slot per element or field; tuple projection and pair helpers lower to fixed slot loads after type checking, and record field labels are kept in the static type descriptor used by field access and `to_string`. Closure values store a table index plus captured values; indirect calls generate the WebAssembly function type needed for each arity used by the program instead of imposing a fixed source-level argument ceiling. Float arithmetic and power unbox operands to `f64`; `int ** int` returns an int, while any float operand makes `**` return a boxed float. Polymorphic top-level functions receive concrete int/float specializations when call sites require different runtime representations. The checker is responsible for rejecting invalid programs before emission.
+The WebAssembly backend uses a uniform `i32` representation. Integers and booleans are immediate values; unit is zero; heap-backed values such as floats, strings, tuples, records, arrays, lists, sets, maps, and closures are represented as pointers. Tuple and record blocks store their element count followed by one `i32` slot per element or field; tuple projection and pair helpers lower to fixed slot loads after type checking, and record field labels are kept in the static type descriptor used by field access and `to_string`. Closure values store a table index plus captured values; indirect calls generate the WebAssembly function type needed for each arity used by the program instead of imposing a fixed source-level argument ceiling. The same path handles direct calls, first-class function values, returned closures, and staged closures that accept more arguments later. Float arithmetic and power unbox operands to `f64`; `int ** int` returns an int, while any float operand makes `**` return a boxed float. Polymorphic top-level functions receive concrete int/float specializations when call sites require different runtime representations. The checker is responsible for rejecting invalid programs before emission.
 
 Runtime collection helpers trap invalid access: negative array lengths, out-of-bounds array reads/writes, empty-list head/tail, and missing `Map.get` keys do not silently read arbitrary memory. Current runtime limits are still intentional: allocation is bump-pointer based, there is no garbage collector, and traps are not yet recoverable language-level exceptions.
 

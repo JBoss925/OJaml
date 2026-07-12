@@ -483,6 +483,10 @@ function checkExpr(expr: Expr, globals: Map<string, Binding>, locals: Map<string
       return type;
     }
     case "Unary":
+      if (expr.op === "not") {
+        unify(checkExpr(expr.expr, globals, locals, context), boolType, expr.expr.span);
+        return boolType;
+      }
       return requireNumeric(checkExpr(expr.expr, globals, locals, context), expr.span);
     case "Binary":
       return checkBinary(expr, globals, locals, context);

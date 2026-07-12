@@ -10,7 +10,7 @@ export const markerOwner = "ojaml-language-service";
 
 let providersRegistered = false;
 
-const keywords = ["let", "rec", "in", "if", "then", "else", "true", "false", "fun", "match", "with", "mod", "type", "of", "open"];
+const keywords = ["let", "rec", "in", "if", "then", "else", "true", "false", "fun", "match", "with", "mod", "type", "of", "open", "not"];
 const stdlibCompletions = getStdlibSignatures();
 
 export function configureOJamlMonaco(monaco: Monaco): void {

@@ -20,7 +20,7 @@ This matrix tracks features currently implemented by the parser, checker, WASM b
 | Forward pipeline operator `|>` | yes | Pipeline |
 | Polymorphic functions and int/float specialization | yes | Type Inference |
 | Function application | yes | all nontrivial examples |
-| First-class functions, including high-arity function values | yes | Higher Order, High-Arity Functions |
+| First-class functions, including high-arity function values and staged closures | yes | Higher Order, High-Arity Functions |
 | Closures with captured locals | yes | Higher Order |
 | Top-level functions passed as values | yes | test suite |
 | `if ... then ... else ...` | yes | Basics |

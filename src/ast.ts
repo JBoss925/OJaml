@@ -58,7 +58,7 @@ export type Expr =
   | { kind: "Record"; fields: Array<{ name: string; nameSpan: SourceSpan; value: Expr }>; span: SourceSpan }
   | { kind: "FieldAccess"; record: Expr; field: string; fieldSpan: SourceSpan; span: SourceSpan }
   | { kind: "Var"; name: string; span: SourceSpan }
-  | { kind: "Unary"; op: "-"; expr: Expr; span: SourceSpan }
+  | { kind: "Unary"; op: "-" | "not"; expr: Expr; span: SourceSpan }
   | { kind: "Binary"; op: BinaryOp; left: Expr; right: Expr; span: SourceSpan }
   | { kind: "Sequence"; first: Expr; second: Expr; span: SourceSpan }
   | { kind: "If"; condition: Expr; thenBranch: Expr; elseBranch: Expr; span: SourceSpan }

@@ -58,6 +58,17 @@ export const ojamlExamples: OJamlExample[] = [
   if d > 5.0 && e <> 0.0 then d + e else 0.0`,
   },
   {
+    id: "boolean-logic",
+    title: "Boolean Logic",
+    source: `let main =
+  let closed = false in
+  let count = 3 in
+  let ready = not closed && not (count = 0) in
+  println (String.concat "closed = " (to_string closed));
+  println (String.concat "ready = " (to_string ready));
+  if ready || not closed then count else 0`,
+  },
+  {
     id: "strings",
     title: "Strings",
     source: `let main =
