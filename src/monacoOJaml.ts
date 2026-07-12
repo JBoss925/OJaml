@@ -26,12 +26,13 @@ export function configureOJamlMonaco(monaco: Monaco): void {
     comments: {
       blockComment: ["(*", "*)"],
     },
-    brackets: [["(", ")"]],
+    brackets: [["(", ")"], ["{", "}"]],
     autoClosingPairs: [
       { open: "(", close: ")" },
+      { open: "{", close: "}" },
       { open: "(*", close: "*)" },
     ],
-    surroundingPairs: [{ open: "(", close: ")" }],
+    surroundingPairs: [{ open: "(", close: ")" }, { open: "{", close: "}" }],
     indentationRules: {
       increaseIndentPattern: /^\s*(?:let\b.*=\s*|let\s+rec\b.*=\s*|if\b.*\bthen\s*|else\s*|match\b.*\bwith\s*|\|.*->\s*|.*->\s*)$/,
       decreaseIndentPattern: /$^/,
@@ -56,8 +57,8 @@ export function configureOJamlMonaco(monaco: Monaco): void {
         [/[a-zA-Z_][a-zA-Z0-9_'.]*/, { cases: { "@keywords": "keyword", "@default": "identifier" } }],
         [/\d+\.\d+/, "number.float"],
         [/\d+/, "number"],
-        [/->|\*\*|<>|<=|>=|&&|\|\||[+\-*/=<>]/, "operator"],
-        [/[()]/, "delimiter"],
+        [/->|\*\*|<>|<=|>=|&&|\|\||[+\-*/=<>.]/, "operator"],
+        [/[(){};]/, "delimiter"],
         [/\|/, "operator"],
       ],
       comment: [

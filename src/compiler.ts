@@ -159,6 +159,15 @@ function emitExpr(expr: Expr, context: EmitContext): string {
       return `(i32.const 0)`;
     case "Tuple":
       return emitTuple(expr, context);
+    case "Record":
+      return emitRecord(expr, context);
+    case "FieldAccess": {
+      const shape = context.exprType(expr.record);
+      if (shape.kind !== "record") throw new Error(`Field access expects a record shape for ${expr.field}`);
+      const index = shape.fields.findIndex((field) => field.name === expr.field);
+      if (index < 0) throw new Error(`Record has no field ${expr.field}`);
+      return recordField(emitExpr(expr.record, context), index);
+    }
     case "Var":
       if (context.locals.has(expr.name)) return `(local.get $${safe(expr.name)})`;
       if (context.captured.has(expr.name)) return `(i32.load (i32.add (local.get $__env) (i32.const ${4 + context.captured.get(expr.name)! * 4})))`;
@@ -247,6 +256,18 @@ function emitTuple(expr: Extract<Expr, { kind: "Tuple" }>, context: EmitContext)
   return `(block (result i32)
   (local.set $${local} (call $alloc (i32.const ${4 + expr.items.length * 4})))
   (i32.store (local.get $${local}) (i32.const ${expr.items.length}))
+  ${stores}
+  (local.get $${local})
+)`;
+}
+
+function emitRecord(expr: Extract<Expr, { kind: "Record" }>, context: EmitContext): string {
+  const local = context.nextTupleLocal();
+  const fields = sortedFields(expr.fields);
+  const stores = fields.map((field, index) => `(i32.store (i32.add (local.get $${local}) (i32.const ${4 + index * 4})) ${emitExpr(field.value, context)})`).join("\n  ");
+  return `(block (result i32)
+  (local.set $${local} (call $alloc (i32.const ${4 + fields.length * 4})))
+  (i32.store (local.get $${local}) (i32.const ${fields.length}))
   ${stores}
   (local.get $${local})
 )`;
@@ -342,6 +363,11 @@ function emitPatternTest(pattern: Pattern, value: string, context: EmitContext):
         return `(i32.and ${test} ${emitPatternTest(item, itemValue, context)})`;
       }, arityTest);
     }
+    case "PRecord": {
+      const fields = sortedFields(pattern.fields);
+      const arityTest = `(i32.eq (i32.load ${value}) (i32.const ${fields.length}))`;
+      return fields.reduce((test, field, index) => `(i32.and ${test} ${emitPatternTest(field.pattern, recordField(value, index), context)})`, arityTest);
+    }
     case "PListNil":
       return `(i32.eqz ${value})`;
     case "PListCons":
@@ -357,6 +383,12 @@ function emitPatternBindings(pattern: Pattern, value: string): string {
       .filter(Boolean)
       .join("\n  ");
   }
+  if (pattern.kind === "PRecord") {
+    return sortedFields(pattern.fields)
+      .map((field, index) => emitPatternBindings(field.pattern, recordField(value, index)))
+      .filter(Boolean)
+      .join("\n  ");
+  }
   if (pattern.kind === "PListCons") {
     return [
       emitPatternBindings(pattern.head, listHead(value)),
@@ -368,6 +400,14 @@ function emitPatternBindings(pattern: Pattern, value: string): string {
 
 function tupleItem(value: string, index: number): string {
   return `(i32.load (i32.add ${value} (i32.const ${4 + index * 4})))`;
+}
+
+function recordField(value: string, index: number): string {
+  return `(i32.load (i32.add ${value} (i32.const ${4 + index * 4})))`;
+}
+
+function sortedFields<T extends { name: string }>(fields: T[]): T[] {
+  return [...fields].sort((left, right) => left.name.localeCompare(right.name));
 }
 
 function listHead(value: string): string {
@@ -514,6 +554,7 @@ type ValueShape =
   | { kind: "int" | "float" | "bool" | "string" | "unit" | "unknown" }
   | { kind: "array" | "list" | "set"; elem: ValueShape }
   | { kind: "tuple"; items: ValueShape[] }
+  | { kind: "record"; fields: Array<{ name: string; value: ValueShape }> }
   | { kind: "map"; key: ValueShape; value: ValueShape }
   | { kind: "fn"; result: ValueShape };
 
@@ -589,18 +630,35 @@ function shapeFromTypeText(type: string): ValueShape {
     const parts = splitTopLevelComma(type.slice(1, -1));
     if (parts.length > 1) return { kind: "tuple", items: parts.map((part) => shapeFromTypeText(part.trim())) };
   }
+  if (type.startsWith("{ ") && type.endsWith(" }")) {
+    return {
+      kind: "record",
+      fields: splitTopLevelSemicolon(type.slice(2, -2)).map((part) => {
+        const colon = part.indexOf(":");
+        return { name: part.slice(0, colon).trim(), value: shapeFromTypeText(part.slice(colon + 1).trim()) };
+      }),
+    };
+  }
   return unknownShape;
 }
 
 function splitTopLevelComma(value: string): string[] {
+  return splitTopLevel(value, ",");
+}
+
+function splitTopLevelSemicolon(value: string): string[] {
+  return splitTopLevel(value, ";");
+}
+
+function splitTopLevel(value: string, separator: "," | ";"): string[] {
   const parts: string[] = [];
   let depth = 0;
   let start = 0;
   for (let index = 0; index < value.length; index++) {
     const ch = value[index];
-    if (ch === "(") depth++;
-    else if (ch === ")") depth--;
-    else if (ch === "," && depth === 0) {
+    if (ch === "(" || ch === "{") depth++;
+    else if (ch === ")" || ch === "}") depth--;
+    else if (ch === separator && depth === 0) {
       parts.push(value.slice(start, index));
       start = index + 1;
     }
@@ -619,6 +677,8 @@ function typeDescriptor(shape: ValueShape): string {
       return `set(${typeDescriptor(shape.elem)})`;
     case "tuple":
       return `tuple(${shape.items.map(typeDescriptor).join(",")})`;
+    case "record":
+      return `record(${shape.fields.map((field) => `${field.name}:${typeDescriptor(field.value)}`).join(";")})`;
     case "map":
       return `map(${typeDescriptor(shape.key)},${typeDescriptor(shape.value)})`;
     case "fn":
@@ -693,6 +753,12 @@ function collectTopLevelCallHints(program: Program, globalTypes: Map<string, Val
       case "Call":
         visit(expr.callee, localTypes);
         expr.args.forEach((arg) => visit(arg, localTypes));
+        break;
+      case "Record":
+        expr.fields.forEach((field) => visit(field.value, localTypes));
+        break;
+      case "FieldAccess":
+        visit(expr.record, localTypes);
         break;
       case "Fun":
         visit(expr.body, localTypes);
@@ -782,6 +848,12 @@ function walkTypes(expr: Expr, types: Map<string, ValueShape>): void {
     case "Tuple":
       expr.items.forEach((item) => walkTypes(item, types));
       break;
+    case "Record":
+      expr.fields.forEach((field) => walkTypes(field.value, types));
+      break;
+    case "FieldAccess":
+      walkTypes(expr.record, types);
+      break;
     case "Unary":
       walkTypes(expr.expr, types);
       break;
@@ -816,6 +888,12 @@ function inferSimpleType(expr: Expr, types: Map<string, ValueShape>): ValueShape
       return unitShape;
     case "Tuple":
       return { kind: "tuple", items: expr.items.map((item) => inferSimpleType(item, types)) };
+    case "Record":
+      return { kind: "record", fields: sortedFields(expr.fields).map((field) => ({ name: field.name, value: inferSimpleType(field.value, types) })) };
+    case "FieldAccess": {
+      const record = inferSimpleType(expr.record, types);
+      return record.kind === "record" ? record.fields.find((field) => field.name === expr.field)?.value ?? unknownShape : unknownShape;
+    }
     case "Var":
       return types.get(expr.name) ?? intShape;
     case "If":
@@ -925,6 +1003,12 @@ function walk(expr: Expr, locals: Set<string>, state: { matchId: number }): void
     case "Tuple":
       expr.items.forEach((item) => walk(item, locals, state));
       break;
+    case "Record":
+      expr.fields.forEach((field) => walk(field.value, locals, state));
+      break;
+    case "FieldAccess":
+      walk(expr.record, locals, state);
+      break;
     case "Unary":
       walk(expr.expr, locals, state);
       break;
@@ -968,6 +1052,12 @@ function freeVars(expr: Expr, bound: Set<string>): Set<string> {
     case "Tuple":
       expr.items.forEach((item) => addAll(freeVars(item, bound)));
       break;
+    case "Record":
+      expr.fields.forEach((field) => addAll(freeVars(field.value, bound)));
+      break;
+    case "FieldAccess":
+      addAll(freeVars(expr.record, bound));
+      break;
     case "If":
       addAll(freeVars(expr.condition, bound));
       addAll(freeVars(expr.thenBranch, bound));
@@ -1008,6 +1098,7 @@ function addPatternLocals(pattern: Pattern, locals: Set<string>): void {
     return;
   }
   if (pattern.kind === "PTuple") pattern.items.forEach((item) => addPatternLocals(item, locals));
+  if (pattern.kind === "PRecord") pattern.fields.forEach((field) => addPatternLocals(field.pattern, locals));
   if (pattern.kind === "PListCons") {
     addPatternLocals(pattern.head, locals);
     addPatternLocals(pattern.tail, locals);
@@ -1020,6 +1111,7 @@ function addPatternBoundNames(pattern: Pattern, bound: Set<string>): void {
     return;
   }
   if (pattern.kind === "PTuple") pattern.items.forEach((item) => addPatternBoundNames(item, bound));
+  if (pattern.kind === "PRecord") pattern.fields.forEach((field) => addPatternBoundNames(field.pattern, bound));
   if (pattern.kind === "PListCons") {
     addPatternBoundNames(pattern.head, bound);
     addPatternBoundNames(pattern.tail, bound);

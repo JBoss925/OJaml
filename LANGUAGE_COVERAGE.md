@@ -10,6 +10,7 @@ This matrix tracks features currently implemented by the parser, checker, WASM b
 | Local function bindings and local `let rec` functions | yes | Local Recursion |
 | Integers, floats, booleans, strings, unit | yes | Hello, Language Tour |
 | Tuple expressions | yes | Tuples |
+| Structural record expressions and field access | yes | Records |
 | Pair projection with `fst` and `snd` | yes | Tuples |
 | String escapes | yes | test suite |
 | Integer and float arithmetic, power, comparison, boolean, unary operators | yes | Language Tour |
@@ -20,11 +21,11 @@ This matrix tracks features currently implemented by the parser, checker, WASM b
 | Top-level functions passed as values | yes | test suite |
 | `if ... then ... else ...` | yes | Basics |
 | `match ... with` | yes | Factorial, Language Tour |
-| Int/float/string/bool/unit/tuple/list/wildcard/variable patterns | yes | Pattern Matching |
+| Int/float/string/bool/unit/tuple/record/list/wildcard/variable patterns | yes | Pattern Matching, Records |
 | `print : int|float|string -> unit` | yes | test suite |
 | `println : int|float|string -> unit` | yes | examples |
 | `to_string : 'a -> string` | yes | examples |
-| Recursive `to_string` formatting for tuples/arrays/lists/sets/maps/functions | yes | test suite |
+| Recursive `to_string` formatting for tuples/records/arrays/lists/sets/maps/functions | yes | test suite |
 | `Float.of_int` and `Float.to_int` | yes | test suite |
 | `String.concat/length/split` | yes | test suite |
 | Polymorphic arrays | yes | Collections, Language Tour |
@@ -40,4 +41,4 @@ This matrix tracks features currently implemented by the parser, checker, WASM b
 | Negative type diagnostics across primitives and stdlib calls | yes | test suite |
 | Exact editor-example output transcripts | yes | all examples |
 
-Not yet implemented: algebraic data type declarations, records, modules/import syntax, exceptions, general tuple projection beyond pairs, pattern matching over array/set/map structure, garbage collection, and recoverable language-level runtime exceptions.
+Not yet implemented: algebraic data type declarations, nominal record type declarations, modules/import syntax, exceptions, general tuple projection beyond pairs, pattern matching over array/set/map structure, garbage collection, and recoverable language-level runtime exceptions.

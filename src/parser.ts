@@ -143,6 +143,19 @@ class Parser {
       if (token.text === "_") return { kind: "PWildcard", span: { start: token.start, end: token.end } };
       return { kind: "PVar", name: token.text, span: { start: token.start, end: token.end } };
     }
+    if (this.match("lbrace")) {
+      const fields: Array<{ name: string; nameSpan: { start: number; end: number }; pattern: Pattern }> = [];
+      if (!this.at("rbrace")) {
+        do {
+          const field = this.expect("ident", "Expected record field name");
+          this.expect("equals", "Expected '=' in record pattern");
+          fields.push({ name: field.text, nameSpan: { start: field.start, end: field.end }, pattern: this.parsePattern() });
+        } while (this.match("semicolon"));
+      }
+      this.expect("rbrace", "Expected '}' in record pattern");
+      this.ensureUniqueFields(fields.map((field) => field.name), token.start, this.previous().end);
+      return { kind: "PRecord", fields, span: { start: token.start, end: this.previous().end } };
+    }
     if (this.match("lbracket")) {
       this.expect("rbracket", "Expected ']' in empty list pattern");
       return { kind: "PListNil", span: { start: token.start, end: this.previous().end } };
@@ -203,7 +216,7 @@ class Parser {
       const expr = this.parseBinary(this.precedence("**"));
       return { kind: "Unary", op: "-", expr, span: { start, end: expr.span.end } };
     }
-    return this.parseAtom();
+    return this.parsePostfix(this.parseAtom());
   }
 
   private parseAtom(): Expr {
@@ -213,7 +226,11 @@ class Parser {
     if (this.match("string")) return { kind: "String", value: token.text, span: { start: token.start, end: token.end } };
     if (this.matchKeyword("true")) return { kind: "Bool", value: true, span: { start: token.start, end: token.end } };
     if (this.matchKeyword("false")) return { kind: "Bool", value: false, span: { start: token.start, end: token.end } };
-    if (this.match("ident")) return { kind: "Var", name: token.text, span: { start: token.start, end: token.end } };
+    if (this.match("ident")) {
+      if (/^[a-z_]/.test(token.text) && token.text.includes(".")) return this.parseDottedFieldAccess(token);
+      return { kind: "Var", name: token.text, span: { start: token.start, end: token.end } };
+    }
+    if (this.match("lbrace")) return this.parseRecord(token.start);
     if (this.match("lparen")) {
       if (this.match("rparen")) return { kind: "Unit", span: { start: token.start, end: this.previous().end } };
       const expr = this.parseExpr();
@@ -231,11 +248,68 @@ class Parser {
     throw new OJamlError("Expected expression", token.start, token.end);
   }
 
+  private parsePostfix(expr: Expr): Expr {
+    let current = expr;
+    while (this.match("dot")) {
+      const field = this.expect("ident", "Expected field name after '.'");
+      current = {
+        kind: "FieldAccess",
+        record: current,
+        field: field.text,
+        fieldSpan: { start: field.start, end: field.end },
+        span: { start: current.span.start, end: field.end },
+      };
+    }
+    return current;
+  }
+
   private operatorText(token: Token): BinaryOp | undefined {
     if (token.kind === "equals") return "=";
     if (token.kind === "operator") return token.text as BinaryOp;
     if (token.kind === "keyword" && token.text === "mod") return "mod";
     return undefined;
+  }
+
+  private parseRecord(start: number): Expr {
+    const fields: Array<{ name: string; nameSpan: { start: number; end: number }; value: Expr }> = [];
+    if (!this.at("rbrace")) {
+      do {
+        const field = this.expect("ident", "Expected record field name");
+        this.expect("equals", "Expected '=' in record expression");
+        fields.push({ name: field.text, nameSpan: { start: field.start, end: field.end }, value: this.parseExpr() });
+      } while (this.match("semicolon"));
+    }
+    this.expect("rbrace", "Expected '}' in record expression");
+    this.ensureUniqueFields(fields.map((field) => field.name), start, this.previous().end);
+    return { kind: "Record", fields, span: { start, end: this.previous().end } };
+  }
+
+  private parseDottedFieldAccess(token: Token): Expr {
+    const parts = token.text.split(".");
+    let cursor = token.start;
+    let expr: Expr = { kind: "Var", name: parts[0], span: { start: token.start, end: token.start + parts[0].length } };
+    cursor += parts[0].length;
+    for (const field of parts.slice(1)) {
+      const fieldStart = cursor + 1;
+      const fieldEnd = fieldStart + field.length;
+      expr = {
+        kind: "FieldAccess",
+        record: expr,
+        field,
+        fieldSpan: { start: fieldStart, end: fieldEnd },
+        span: { start: expr.span.start, end: fieldEnd },
+      };
+      cursor = fieldEnd;
+    }
+    return expr;
+  }
+
+  private ensureUniqueFields(fields: string[], start: number, end: number): void {
+    const seen = new Set<string>();
+    for (const field of fields) {
+      if (seen.has(field)) throw new OJamlError(`Duplicate record field '${field}'`, start, end);
+      seen.add(field);
+    }
   }
 
   private precedence(op: BinaryOp): number {
@@ -249,7 +323,7 @@ class Parser {
 
   private canStartAtom(): boolean {
     const token = this.peek();
-    if (token.kind === "int" || token.kind === "float" || token.kind === "string" || token.kind === "ident" || token.kind === "lparen") return true;
+    if (token.kind === "int" || token.kind === "float" || token.kind === "string" || token.kind === "ident" || token.kind === "lparen" || token.kind === "lbrace") return true;
     if (token.kind === "keyword" && ["true", "false"].includes(token.text)) return true;
     if (token.kind === "keyword" && expressionTerminators.has(token.text)) return false;
     return false;

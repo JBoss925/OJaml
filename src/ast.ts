@@ -25,6 +25,8 @@ export type Expr =
   | { kind: "Bool"; value: boolean; span: SourceSpan }
   | { kind: "Unit"; span: SourceSpan }
   | { kind: "Tuple"; items: Expr[]; span: SourceSpan }
+  | { kind: "Record"; fields: Array<{ name: string; nameSpan: SourceSpan; value: Expr }>; span: SourceSpan }
+  | { kind: "FieldAccess"; record: Expr; field: string; fieldSpan: SourceSpan; span: SourceSpan }
   | { kind: "Var"; name: string; span: SourceSpan }
   | { kind: "Unary"; op: "-"; expr: Expr; span: SourceSpan }
   | { kind: "Binary"; op: BinaryOp; left: Expr; right: Expr; span: SourceSpan }
@@ -49,6 +51,7 @@ export type Pattern =
   | { kind: "PBool"; value: boolean; span: SourceSpan }
   | { kind: "PUnit"; span: SourceSpan }
   | { kind: "PTuple"; items: Pattern[]; span: SourceSpan }
+  | { kind: "PRecord"; fields: Array<{ name: string; nameSpan: SourceSpan; pattern: Pattern }>; span: SourceSpan }
   | { kind: "PListNil"; span: SourceSpan }
   | { kind: "PListCons"; head: Pattern; tail: Pattern; span: SourceSpan }
   | { kind: "PWildcard"; span: SourceSpan }

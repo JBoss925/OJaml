@@ -149,6 +149,25 @@ export const ojamlExamples: OJamlExample[] = [
   sum + List.length points`,
   },
   {
+    id: "records",
+    title: "Records",
+    source: `let main =
+  let ada = { name = "Ada"; year = 1815; active = true } in
+  let grace = { name = "Grace"; year = 1906; active = true } in
+  let label =
+    match ada with
+    | { active = true; name = n; year = y } ->
+        String.concat n (String.concat " " (to_string y))
+    | _ -> "inactive"
+  in
+  let people = List.cons ada (List.cons grace (List.empty ())) in
+  let _ = println (String.concat "ada = " (to_string ada)) in
+  let _ = println (String.concat "ada.name = " ada.name) in
+  let _ = println (String.concat "label = " label) in
+  let _ = println (String.concat "people = " (to_string people)) in
+  ada.year + List.length people`,
+  },
+  {
     id: "type-inference",
     title: "Type Inference",
     source: `let square x = x ** 2

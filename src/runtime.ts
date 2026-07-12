@@ -170,6 +170,16 @@ function formatValue(memory: WebAssembly.Memory, value: number, descriptor: stri
     }
     return `(${items.join(", ")})`;
   }
+  if (descriptor.startsWith("record(") && descriptor.endsWith(")")) {
+    const fields = splitRecordDescriptors(descriptor.slice("record(".length, -1));
+    const view = new DataView(memory.buffer);
+    const items: string[] = [];
+    for (let index = 0; index < fields.length; index++) {
+      const item = view.getInt32(value + 4 + index * 4, true);
+      items.push(`${fields[index].name} = ${formatValue(memory, item, fields[index].descriptor)}`);
+    }
+    return `{ ${items.join("; ")} }`;
+  }
   if (descriptor.startsWith("map(") && descriptor.endsWith(")")) {
     const [keyDescriptor, valueDescriptor] = splitDescriptors(descriptor.slice("map(".length, -1));
     const view = new DataView(memory.buffer);
@@ -187,6 +197,17 @@ function formatValue(memory: WebAssembly.Memory, value: number, descriptor: stri
 }
 
 function splitDescriptors(value: string): string[] {
+  return splitTopLevel(value, ",");
+}
+
+function splitRecordDescriptors(value: string): Array<{ name: string; descriptor: string }> {
+  return splitTopLevel(value, ";").map((part) => {
+    const colon = part.indexOf(":");
+    return { name: part.slice(0, colon), descriptor: part.slice(colon + 1) };
+  });
+}
+
+function splitTopLevel(value: string, separator: "," | ";"): string[] {
   const parts: string[] = [];
   let depth = 0;
   let start = 0;
@@ -194,7 +215,7 @@ function splitDescriptors(value: string): string[] {
     const ch = value[index];
     if (ch === "(") depth++;
     else if (ch === ")") depth--;
-    else if (ch === "," && depth === 0) {
+    else if (ch === separator && depth === 0) {
       parts.push(value.slice(start, index));
       start = index + 1;
     }

@@ -53,6 +53,21 @@ test("parses tuple patterns without changing grouped patterns or unit patterns",
   assert.equal(match.arms[0].pattern.items[1].kind, "PString");
 });
 
+test("parses record expressions, field access, and record patterns", () => {
+  const ast = parse(`let main =
+  let person = { name = "Ada"; year = 1815 } in
+  match person with
+  | { year = y; name = n } -> person.year`);
+  const main = ast.declarations[0].value;
+
+  assert.equal(main.kind, "LetIn");
+  assert.equal(main.value.kind, "Record");
+  assert.deepEqual(main.value.fields.map((field) => field.name), ["name", "year"]);
+  assert.equal(main.body.kind, "Match");
+  assert.equal(main.body.arms[0].pattern.kind, "PRecord");
+  assert.equal(main.body.arms[0].body.kind, "FieldAccess");
+});
+
 test("parses empty and cons list patterns as right-associative patterns", () => {
   const ast = parse(`let main =
   match List.empty () with
@@ -799,6 +814,70 @@ test("tuples work inside arrays, lists, maps, and sets", async () => {
   assert.equal(result.output, "[(3, 4), (5, 6)]\n[(origin, (3, 4)), (next, (5, 6))]\n{ points: [(3, 4), (5, 6)] }\n{ (3, 4) }\n");
 });
 
+test("records access fields, format labels, and use deterministic field order", async () => {
+  const result = await runOJaml(`let main =
+  let person = { year = 1815; name = "Ada"; active = true } in
+  let _ = println (to_string person) in
+  let _ = println person.name in
+  if person.active then person.year else 0`);
+
+  assert.equal(result.value, 1815);
+  assert.equal(result.output, "{ active = true; name = Ada; year = 1815 }\nAda\n");
+});
+
+test("records nest inside tuples, arrays, lists, maps, and sets", async () => {
+  const result = await runOJaml(`let main =
+  let ada = { name = "Ada"; year = 1815 } in
+  let grace = { name = "Grace"; year = 1906 } in
+  let pair = (ada, grace) in
+  let people = List.cons ada (List.cons grace (List.empty ())) in
+  let table = Map.set (Map.empty ()) "first" ada in
+  let seen = Set.add (Set.empty ()) grace in
+  let _ = println (to_string pair) in
+  let _ = println (to_string people) in
+  let _ = println (to_string table) in
+  let _ = println (to_string seen) in
+  (fst pair).year + List.length people + (Map.get table "first").year + Set.length seen`);
+
+  assert.equal(result.value, 3633);
+  assert.equal(result.output, "({ name = Ada; year = 1815 }, { name = Grace; year = 1906 })\n[{ name = Ada; year = 1815 }, { name = Grace; year = 1906 }]\n{ first: { name = Ada; year = 1815 } }\n{ { name = Grace; year = 1906 } }\n");
+});
+
+test("record patterns destructure fields independent of source order", async () => {
+  const result = await runOJaml(`let main =
+  let person = { name = "Ada"; year = 1815; active = true } in
+  match person with
+  | { active = true; year = y; name = "Ada" } -> y
+  | _ -> 0`);
+
+  assert.equal(result.value, 1815);
+});
+
+test("record patterns bind fields inside closures", async () => {
+  const result = await runOJaml(`let main =
+  let suffix = 10 in
+  let score person =
+    match person with
+    | { name = _; year = y } -> y + suffix
+  in
+  score { year = 1815; name = "Ada" }`);
+
+  assert.equal(result.value, 1825);
+});
+
+test("records reject missing fields, mismatched fields, and duplicate labels", () => {
+  const invalid = [
+    `let main = { name = "Ada" }.year`,
+    `let main = if true then { name = "Ada" } else { year = 1815 }`,
+    `let main = match { name = "Ada" } with | { year = y } -> y | _ -> 0`,
+    `let main = { name = "Ada"; name = "Grace" }`,
+  ];
+
+  for (const source of invalid) {
+    assert.ok(getOJamlSyntaxMarkers(source, 8).length > 0, source);
+  }
+});
+
 test("fst and snd project pair elements with precise types", async () => {
   const result = await runOJaml(`let main =
   let point = (3, 4) in
@@ -983,12 +1062,15 @@ test("list patterns keep conservative exhaustiveness", () => {
 
 test("main cannot return tuples directly", () => {
   const markers = getOJamlSyntaxMarkers(`let main = (1, 2)`, 8);
+  const recordMarkers = getOJamlSyntaxMarkers(`let main = { name = "Ada" }`, 8);
 
   assert.equal(markers.length, 1);
   assert.match(markers[0].message, /cannot return \(int, int\) directly/);
+  assert.equal(recordMarkers.length, 1);
+  assert.match(recordMarkers[0].message, /cannot return \{ name: string \} directly/);
 });
 
-test("match supports int, float, string, bool, unit, tuple, list, wildcard, and variable patterns", async () => {
+test("match supports int, float, string, bool, unit, tuple, record, list, wildcard, and variable patterns", async () => {
   const result = await runOJaml(`let classify n =
   match n with
   | 0 -> "zero"
@@ -1001,10 +1083,11 @@ let main =
   let d = match 1.5 with | 1.5 -> 4 | _ -> 0 in
   let e = match (2, 3) with | (x, y) -> x + y in
   let f = match List.cons 5 (List.empty ()) with | head :: [] -> head | _ -> 0 in
+  let g = match { name = "Ada"; year = 1815 } with | { year = y; name = "Ada" } -> y | _ -> 0 in
   let _ = print (classify 7) in
-  a + b + c + d + e + f`);
+  a + b + c + d + e + f + g`);
 
-  assert.equal(result.value, 20);
+  assert.equal(result.value, 1835);
   assert.deepEqual(result.prints, ["nonzero"]);
 });
 
@@ -1019,6 +1102,7 @@ const expectedExampleResults: Map<string, { mainType: string; value: number; out
   ["maps", { mainType: "int", value: 1906, output: "years = { Grace: 1906, Ada: 1815 }\nAda = 1815\nGrace = found\n" }],
   ["sets", { mainType: "int", value: 2, output: "names = { Grace, Ada }\nhas Ada = true\n" }],
   ["tuples", { mainType: "int", value: 9, output: "point = (3, 4)\nx = 3\ny = 4\nx + y = 7\nlabeled = (origin, (3, 4))\npoints = [(3, 4), (0, 0)]\n" }],
+  ["records", { mainType: "int", value: 1817, output: "ada = { active = true; name = Ada; year = 1815 }\nada.name = Ada\nlabel = Ada 1815\npeople = [{ active = true; name = Ada; year = 1815 }, { active = true; name = Grace; year = 1906 }]\n" }],
   ["type-inference", { mainType: "int", value: 87, output: "square 9 = 81\nsquare 2.5 = 6.25\n" }],
   ["local-recursion", { mainType: "int", value: 15, output: "values = [4, 5, 6]\nsum = 15\n" }],
   ["high-arity-functions", { mainType: "int", value: 112, output: "direct = 21\nthrough value = 21\nreturned closure = 70\n" }],
@@ -1198,6 +1282,25 @@ test("checker exposes tuple pattern locals for hovers", () => {
   assert.equal(mainLocals.get("active"), "active : bool");
 });
 
+test("checker exposes record token, field, and pattern local types for hovers", () => {
+  const source = `let main =
+  let person = { year = 1815; name = "Ada"; active = true } in
+  match person with
+  | { name = n; year = y; active = true } -> y + String.length person.name
+  | _ -> 0`;
+  const checked = check(parse(source));
+  const symbols = new Map(checked.symbols.map((symbol) => [symbol.name, symbol]));
+  const mainLocals = new Map(symbols.get("main")?.locals?.map((symbol) => [symbol.name, symbol.detail]));
+  const recordToken = checked.tokens.find((token) => token.name === "record");
+  const nameFieldToken = checked.tokens.find((token) => token.name === "name" && token.span.start === source.lastIndexOf("name"));
+
+  assert.equal(mainLocals.get("person"), "person : { active: bool; name: string; year: int }");
+  assert.equal(mainLocals.get("n"), "n : string");
+  assert.equal(mainLocals.get("y"), "y : int");
+  assert.equal(recordToken?.detail, "record : { active: bool; name: string; year: int }");
+  assert.equal(nameFieldToken?.detail, "name : string");
+});
+
 test("checker exposes list pattern locals for hovers", () => {
   const source = `let main =
   match List.cons "Ada" (List.empty ()) with
@@ -1317,19 +1420,19 @@ let main =
   ].join("\n"));
 });
 
-test("to_string recursively formats nested arrays, lists, maps, tuples, and function values", async () => {
+test("to_string recursively formats nested arrays, lists, maps, tuples, records, and function values", async () => {
   const result = await runOJaml(`let inc x = x + 1
 
 let main =
   let rows = Array.make 2 (List.empty ()) in
   let _ = Array.set rows 0 (List.cons 1 (List.cons 2 (List.empty ()))) in
   let _ = Array.set rows 1 (List.cons 3 (List.empty ())) in
-  let lookup = Map.set (Map.empty ()) "rows" (rows, "matrix") in
+  let lookup = Map.set (Map.empty ()) "rows" { data = rows; label = "matrix" } in
   let _ = println (to_string rows) in
   let _ = println (to_string lookup) in
   println (to_string inc)`);
 
-  assert.match(result.output, /^\[\[1, 2\], \[3\]\]\n\{ rows: \(\[\[1, 2\], \[3\]\], matrix\) \}\nFunction \d+\n$/);
+  assert.match(result.output, /^\[\[1, 2\], \[3\]\]\n\{ rows: \{ data = \[\[1, 2\], \[3\]\]; label = matrix \} \}\nFunction \d+\n$/);
 });
 
 test("anonymous functions are first-class values", async () => {

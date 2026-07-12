@@ -1,14 +1,15 @@
 import type { Declaration, Expr, Pattern, Program, SourceSpan } from "./ast";
 import { OJamlError } from "./errors";
 
-export type OJamlType = "int" | "float" | "bool" | "string" | "unit" | "tuple" | "array" | "list" | "set" | "map" | "fn";
+export type OJamlType = "int" | "float" | "bool" | "string" | "unit" | "tuple" | "record" | "array" | "list" | "set" | "map" | "fn";
 export type RuntimeMainType = "int" | "float" | "bool" | "unit";
 
 type Type =
-  | { kind: "prim"; name: Exclude<OJamlType, "tuple" | "array" | "list" | "set" | "map" | "fn"> }
+  | { kind: "prim"; name: Exclude<OJamlType, "tuple" | "record" | "array" | "list" | "set" | "map" | "fn"> }
   | { kind: "var"; id: number; instance?: Type; numeric?: boolean }
   | { kind: "app"; name: "array" | "list" | "set"; args: [Type] }
   | { kind: "app"; name: "tuple"; args: Type[] }
+  | { kind: "app"; name: "record"; fields: Array<{ name: string; type: Type }> }
   | { kind: "app"; name: "map"; args: [Type, Type] }
   | { kind: "fn"; params: Type[]; result: Type };
 
@@ -266,6 +267,21 @@ function checkExpr(expr: Expr, globals: Map<string, Binding>, locals: Map<string
       context.tokens.push({ name: "tuple", kind: "literal", type, span: expr.span });
       return type;
     }
+    case "Record": {
+      const type = recordType(expr.fields.map((field) => ({ name: field.name, type: checkExpr(field.value, globals, locals, context) })));
+      context.tokens.push({ name: "record", kind: "literal", type, span: expr.span });
+      return type;
+    }
+    case "FieldAccess": {
+      const record = prune(checkExpr(expr.record, globals, locals, context));
+      if (record.kind !== "app" || record.name !== "record") {
+        throw new OJamlError(`Field access expects a record; got ${showType(record)}`, expr.record.span.start, expr.record.span.end);
+      }
+      const field = record.fields.find((item) => item.name === expr.field);
+      if (!field) throw new OJamlError(`Record has no field '${expr.field}'`, expr.fieldSpan.start, expr.fieldSpan.end);
+      context.tokens.push({ name: expr.field, kind: "value", type: field.type, span: expr.fieldSpan });
+      return field.type;
+    }
     case "Var": {
       const local = locals.get(expr.name);
       if (local) {
@@ -403,6 +419,7 @@ function isStructurallyExhaustiveMatch(patterns: Pattern[], scrutineeType: Type)
 function isPatternCatchAllLike(pattern: Pattern): boolean {
   if (pattern.kind === "PWildcard" || pattern.kind === "PVar") return true;
   if (pattern.kind === "PTuple") return pattern.items.every(isPatternCatchAllLike);
+  if (pattern.kind === "PRecord") return pattern.fields.every((field) => isPatternCatchAllLike(field.pattern));
   return false;
 }
 
@@ -522,6 +539,17 @@ function checkPattern(pattern: Pattern, scrutinee: Type, locals: Map<string, Typ
       const exhaustiveItems = pattern.items.map((item, index) => checkPattern(item, itemTypes[index], locals, context));
       return exhaustiveItems.every(Boolean);
     }
+    case "PRecord": {
+      const fieldTypes = pattern.fields.map((field) => ({ name: field.name, type: typeVar() }));
+      const record = recordType(fieldTypes);
+      unify(scrutinee, record, pattern.span);
+      context.tokens.push({ name: "record pattern", kind: "literal", type: record, span: pattern.span });
+      const exhaustiveFields = pattern.fields.map((field) => {
+        const fieldType = fieldTypes.find((item) => item.name === field.name)?.type ?? typeVar();
+        return checkPattern(field.pattern, fieldType, locals, context);
+      });
+      return exhaustiveFields.every(Boolean);
+    }
     case "PListNil": {
       const elem = typeVar();
       unify(scrutinee, app("list", [elem]), pattern.span);
@@ -550,7 +578,7 @@ function sameBranches(left: Type, right: Type, span: SourceSpan): Type {
   return left;
 }
 
-function prim(name: Exclude<OJamlType, "tuple" | "array" | "list" | "set" | "map" | "fn">): Type {
+function prim(name: Exclude<OJamlType, "tuple" | "record" | "array" | "list" | "set" | "map" | "fn">): Type {
   return { kind: "prim", name };
 }
 
@@ -561,6 +589,10 @@ function app(name: "array" | "list" | "set" | "tuple" | "map", args: Type[]): Ty
   if (name === "map") return { kind: "app", name, args: args as [Type, Type] };
   if (name === "tuple") return { kind: "app", name, args };
   return { kind: "app", name, args: args as [Type] };
+}
+
+function recordType(fields: Array<{ name: string; type: Type }>): Type {
+  return { kind: "app", name: "record", fields: [...fields].sort((left, right) => left.name.localeCompare(right.name)) };
 }
 
 function fn(params: Type[], result: Type): Type {
@@ -602,7 +634,17 @@ function unify(leftRaw: Type, rightRaw: Type, span: SourceSpan): void {
     return;
   }
   if (left.kind === "app" && right.kind === "app") {
-    if (left.name !== right.name || left.args.length !== right.args.length) throw typeMismatch(left, right, span);
+    if (left.name !== right.name) throw typeMismatch(left, right, span);
+    if (left.name === "record" || right.name === "record") {
+      if (left.name !== "record" || right.name !== "record") throw typeMismatch(left, right, span);
+      if (left.fields.length !== right.fields.length) throw typeMismatch(left, right, span);
+      left.fields.forEach((field, index) => {
+        if (field.name !== right.fields[index].name) throw typeMismatch(left, right, span);
+        unify(field.type, right.fields[index].type, span);
+      });
+      return;
+    }
+    if (left.args.length !== right.args.length) throw typeMismatch(left, right, span);
     left.args.forEach((arg, index) => unify(arg, right.args[index], span));
     return;
   }
@@ -627,6 +669,7 @@ function fresh(type: Type, seen = new Map<number, Type>()): Type {
   }
   if (pruned.kind === "prim") return pruned;
   if (pruned.kind === "fn") return fn(pruned.params.map((param) => fresh(param, seen)), fresh(pruned.result, seen));
+  if (pruned.name === "record") return recordType(pruned.fields.map((field) => ({ name: field.name, type: fresh(field.type, seen) })));
   if (pruned.name === "map") return app("map", [fresh(pruned.args[0], seen), fresh(pruned.args[1], seen)]);
   if (pruned.name === "tuple") return app("tuple", pruned.args.map((arg) => fresh(arg, seen)));
   return app(pruned.name, [fresh(pruned.args[0], seen)]);
@@ -636,6 +679,7 @@ function occurs(variable: Type, type: Type): boolean {
   const pruned = prune(type);
   if (pruned === variable) return true;
   if (pruned.kind === "fn") return pruned.params.some((param) => occurs(variable, param)) || occurs(variable, pruned.result);
+  if (pruned.kind === "app" && pruned.name === "record") return pruned.fields.some((field) => occurs(variable, field.type));
   if (pruned.kind === "app") return pruned.args.some((arg) => occurs(variable, arg));
   return false;
 }
@@ -654,6 +698,7 @@ function showType(type: Type): string {
   }
   if (pruned.kind === "fn") return `${pruned.params.map(showType).join(" -> ")} -> ${showType(pruned.result)}`;
   if (pruned.name === "tuple") return `(${pruned.args.map(showType).join(", ")})`;
+  if (pruned.name === "record") return `{ ${pruned.fields.map((field) => `${field.name}: ${showType(field.type)}`).join("; ")} }`;
   if (pruned.name === "map") return `(${showType(pruned.args[0])}, ${showType(pruned.args[1])}) map`;
   return `${showType(pruned.args[0])} ${pruned.name}`;
 }
@@ -756,6 +801,12 @@ function collectLocalSymbolsInExpr(
     case "Tuple":
       expr.items.forEach((item) => collectLocalSymbolsInExpr(item, globals, locals, symbols));
       return undefined;
+    case "Record":
+      expr.fields.forEach((field) => collectLocalSymbolsInExpr(field.value, globals, locals, symbols));
+      return undefined;
+    case "FieldAccess":
+      collectLocalSymbolsInExpr(expr.record, globals, locals, symbols);
+      return undefined;
     case "Call":
       collectLocalSymbolsInExpr(expr.callee, globals, locals, symbols);
       expr.args.forEach((arg) => collectLocalSymbolsInExpr(arg, globals, locals, symbols));
@@ -803,6 +854,16 @@ function collectPatternSymbols(
       ? pruned.args
       : pattern.items.map(() => typeVar());
     pattern.items.forEach((item, index) => collectPatternSymbols(item, itemTypes[index] ?? typeVar(), locals, symbols));
+    return;
+  }
+  if (pattern.kind === "PRecord") {
+    const fields = pruned.kind === "app" && pruned.name === "record"
+      ? pruned.fields
+      : pattern.fields.map((field) => ({ name: field.name, type: typeVar() }));
+    pattern.fields.forEach((field) => {
+      const fieldType = fields.find((item) => item.name === field.name)?.type ?? typeVar();
+      collectPatternSymbols(field.pattern, fieldType, locals, symbols);
+    });
     return;
   }
   if (pattern.kind === "PListCons") {
