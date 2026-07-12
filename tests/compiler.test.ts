@@ -131,6 +131,27 @@ test("parses fixed-length array patterns", () => {
   assert.equal(match.body.arms[1].pattern.items.length, 0);
 });
 
+test("parses set and map patterns", () => {
+  const ast = parse(`let main =
+  match Set.add (Set.empty ()) "Ada" with
+  | {| "Ada" |} -> 1
+  | _ -> 0
+
+let other =
+  match Map.set (Map.empty ()) "Ada" 1815 with
+  | {| "Ada": year |} -> year
+  | {| : |} -> 0
+  | _ -> 1`);
+
+  const main = asLet(ast.declarations[0]);
+  const other = asLet(ast.declarations[1]);
+  assert.equal(main.value.kind, "Match");
+  assert.equal(main.value.arms[0].pattern.kind, "PSet");
+  assert.equal(other.value.kind, "Match");
+  assert.equal(other.value.arms[0].pattern.kind, "PMap");
+  assert.equal(other.value.arms[1].pattern.kind, "PMap");
+});
+
 test("emits wasm text for scalar program", () => {
   const { wat } = compile(`let main = 40 + 2`);
   assert.match(wat, /export "main"/);
@@ -1281,6 +1302,124 @@ test("array patterns keep conservative exhaustiveness", () => {
   assert.match(nonExhaustive[0].message, /catch-all/);
 });
 
+test("set patterns match exact stored order and bind nested values", async () => {
+  const result = await runOJaml(`let main =
+  let values = Set.add (Set.add (Set.empty ()) ("Ada", 1815)) ("Grace", 1906) in
+  match values with
+  | {| (name, year); ("Ada", 1815) |} ->
+      let _ = println (String.concat name (String.concat " " (to_string year))) in
+      year
+  | _ -> 0`);
+
+  assert.equal(result.value, 1906);
+  assert.equal(result.output, "Grace 1906\n");
+});
+
+test("set patterns cover empty, length mismatch, and nested element mismatch", async () => {
+  const empty = await runOJaml(`let main =
+  match Set.empty () with
+  | {| |} -> 1
+  | _ -> 0`);
+  const tooShort = await runOJaml(`let main =
+  let values = Set.add (Set.empty ()) 1 in
+  match values with
+  | {| 1; 2 |} -> 0
+  | {| 1 |} -> 2
+  | _ -> 3`);
+  const mismatch = await runOJaml(`let main =
+  let values = Set.add (Set.add (Set.empty ()) 1) 2 in
+  match values with
+  | {| 2; 3 |} -> 0
+  | {| 2; 1 |} -> 4
+  | _ -> 5`);
+
+  assert.equal(empty.value, 1);
+  assert.equal(tooShort.value, 2);
+  assert.equal(mismatch.value, 4);
+});
+
+test("map patterns match exact entry order and bind keys and values", async () => {
+  const result = await runOJaml(`let main =
+  let scores = Map.set (Map.set (Map.empty ()) "Ada" 1815) "Grace" 1906 in
+  match scores with
+  | {| winner: year; "Ada": first |} ->
+      let _ = println (String.concat winner (String.concat " " (to_string year))) in
+      year - first
+  | _ -> 0`);
+
+  assert.equal(result.value, 91);
+  assert.equal(result.output, "Grace 1906\n");
+});
+
+test("map patterns cover empty maps, length mismatch, and value mismatch", async () => {
+  const empty = await runOJaml(`let main =
+  match Map.empty () with
+  | {| : |} -> 1
+  | _ -> 0`);
+  const tooShort = await runOJaml(`let main =
+  let scores = Map.set (Map.empty ()) "Ada" 1815 in
+  match scores with
+  | {| "Ada": 1815; "Grace": 1906 |} -> 0
+  | {| "Ada": year |} -> year
+  | _ -> 3`);
+  const mismatch = await runOJaml(`let main =
+  let scores = Map.set (Map.set (Map.empty ()) "Ada" 1815) "Grace" 1906 in
+  match scores with
+  | {| "Grace": 1907; "Ada": 1815 |} -> 0
+  | {| "Grace": 1906; "Ada": year |} -> year
+  | _ -> 5`);
+
+  assert.equal(empty.value, 1);
+  assert.equal(tooShort.value, 1815);
+  assert.equal(mismatch.value, 1815);
+});
+
+test("set and map patterns reject element, key, value, and scrutinee mismatches", () => {
+  const cases = [
+    `let main =
+  let values = Set.add (Set.empty ()) 1 in
+  match values with
+  | {| "one" |} -> 1
+  | _ -> 0`,
+    `let main =
+  let scores = Map.set (Map.empty ()) "Ada" 1815 in
+  match scores with
+  | {| 1: 1815 |} -> 1
+  | _ -> 0`,
+    `let main =
+  let scores = Map.set (Map.empty ()) "Ada" 1815 in
+  match scores with
+  | {| "Ada": "old" |} -> 1
+  | _ -> 0`,
+    `let main =
+  match 1 with
+  | {| 1 |} -> 1
+  | _ -> 0`,
+    `let main =
+  match 1 with
+  | {| 1: 2 |} -> 1
+  | _ -> 0`,
+  ];
+
+  for (const source of cases) {
+    assert.ok(getOJamlSyntaxMarkers(source, 8).length > 0, source);
+  }
+});
+
+test("set and map patterns keep conservative exhaustiveness", () => {
+  const setMarkers = getOJamlSyntaxMarkers(`let main =
+  let values = Set.add (Set.empty ()) 1 in
+  match values with
+  | {| 1 |} -> 1`, 8);
+  const mapMarkers = getOJamlSyntaxMarkers(`let main =
+  let scores = Map.set (Map.empty ()) "Ada" 1815 in
+  match scores with
+  | {| "Ada": 1815 |} -> 1`, 8);
+
+  assert.match(setMarkers[0].message, /catch-all/);
+  assert.match(mapMarkers[0].message, /catch-all/);
+});
+
 test("main cannot return tuples directly", () => {
   const markers = getOJamlSyntaxMarkers(`let main = (1, 2)`, 8);
   const recordMarkers = getOJamlSyntaxMarkers(`let main = { name = "Ada" }`, 8);
@@ -1291,7 +1430,7 @@ test("main cannot return tuples directly", () => {
   assert.match(recordMarkers[0].message, /cannot return \{ name: string \} directly/);
 });
 
-test("match supports int, float, string, bool, unit, tuple, record, list, array, wildcard, and variable patterns", async () => {
+test("match supports int, float, string, bool, unit, tuple, record, list, array, set, map, wildcard, and variable patterns", async () => {
   const result = await runOJaml(`let classify n =
   match n with
   | 0 -> "zero"
@@ -1328,7 +1467,7 @@ const expectedExampleResults: Map<string, { mainType: string; value: number; out
   ["type-inference", { mainType: "int", value: 87, output: "square 9 = 81\nsquare 2.5 = 6.25\n" }],
   ["local-recursion", { mainType: "int", value: 15, output: "values = [4, 5, 6]\nsum = 15\n" }],
   ["high-arity-functions", { mainType: "int", value: 112, output: "direct = 21\nthrough value = 21\nreturned closure = 70\n" }],
-  ["pattern-matching", { mainType: "unit", value: 0, output: "many\none\none point five\nother\n3,4\nfirst Ada\n" }],
+  ["pattern-matching", { mainType: "unit", value: 0, output: "many\none\none point five\nother\n3,4\nfirst Ada\nset has Grace then Ada\nGrace born 1906\n" }],
   ["factorial", { mainType: "int", value: 720, output: "720\n" }],
   ["fibonacci", { mainType: "int", value: 55, output: "55\n" }],
   ["gcd", { mainType: "int", value: 21, output: "21\n" }],
@@ -1548,6 +1687,22 @@ test("checker exposes array pattern locals for hovers", () => {
 
   assert.equal(mainLocals.get("first"), "first : string");
   assert.equal(mainLocals.get("second"), "second : string");
+});
+
+test("checker exposes set and map pattern locals for hovers", () => {
+  const source = `let main =
+  let values = Set.add (Set.empty ()) 1 in
+  let scores = Map.set (Map.empty ()) "Ada" 1815 in
+  match (values, scores) with
+  | ({| first |}, {| name: year |}) -> first + year + String.length name
+  | _ -> 0`;
+  const checked = check(parse(source));
+  const symbols = new Map(checked.symbols.map((symbol) => [symbol.name, symbol]));
+  const mainLocals = new Map(symbols.get("main")?.locals?.map((symbol) => [symbol.name, symbol.detail]));
+
+  assert.equal(mainLocals.get("first"), "first : int");
+  assert.equal(mainLocals.get("name"), "name : string");
+  assert.equal(mainLocals.get("year"), "year : int");
 });
 
 test("checker exposes local let rec function types for hovers", () => {

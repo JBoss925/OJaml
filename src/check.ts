@@ -468,6 +468,8 @@ function isPatternCatchAllLike(pattern: Pattern): boolean {
   if (pattern.kind === "PWildcard" || pattern.kind === "PVar") return true;
   if (pattern.kind === "PTuple") return pattern.items.every(isPatternCatchAllLike);
   if (pattern.kind === "PRecord") return pattern.fields.every((field) => isPatternCatchAllLike(field.pattern));
+  if (pattern.kind === "PSet") return pattern.items.every(isPatternCatchAllLike);
+  if (pattern.kind === "PMap") return pattern.entries.every((entry) => isPatternCatchAllLike(entry.key) && isPatternCatchAllLike(entry.value));
   return false;
 }
 
@@ -604,6 +606,26 @@ function checkPattern(pattern: Pattern, scrutinee: Type, locals: Map<string, Typ
       unify(scrutinee, arrayType, pattern.span);
       context.tokens.push({ name: "[| |]", kind: "literal", type: arrayType, span: pattern.span });
       pattern.items.forEach((item) => checkPattern(item, elem, locals, context));
+      return false;
+    }
+    case "PSet": {
+      const elem = typeVar();
+      const setType = app("set", [elem]);
+      unify(scrutinee, setType, pattern.span);
+      context.tokens.push({ name: "{| |}", kind: "literal", type: setType, span: pattern.span });
+      pattern.items.forEach((item) => checkPattern(item, elem, locals, context));
+      return false;
+    }
+    case "PMap": {
+      const key = typeVar();
+      const value = typeVar();
+      const mapType = app("map", [key, value]);
+      unify(scrutinee, mapType, pattern.span);
+      context.tokens.push({ name: "{| : |}", kind: "literal", type: mapType, span: pattern.span });
+      pattern.entries.forEach((entry) => {
+        checkPattern(entry.key, key, locals, context);
+        checkPattern(entry.value, value, locals, context);
+      });
       return false;
     }
     case "PListNil": {
@@ -930,6 +952,20 @@ function collectPatternSymbols(
   if (pattern.kind === "PArray") {
     const elem = pruned.kind === "app" && pruned.name === "array" ? pruned.args[0] : typeVar();
     pattern.items.forEach((item) => collectPatternSymbols(item, elem, locals, symbols));
+    return;
+  }
+  if (pattern.kind === "PSet") {
+    const elem = pruned.kind === "app" && pruned.name === "set" ? pruned.args[0] : typeVar();
+    pattern.items.forEach((item) => collectPatternSymbols(item, elem, locals, symbols));
+    return;
+  }
+  if (pattern.kind === "PMap") {
+    const key = pruned.kind === "app" && pruned.name === "map" ? pruned.args[0] : typeVar();
+    const value = pruned.kind === "app" && pruned.name === "map" ? pruned.args[1] : typeVar();
+    pattern.entries.forEach((entry) => {
+      collectPatternSymbols(entry.key, key, locals, symbols);
+      collectPatternSymbols(entry.value, value, locals, symbols);
+    });
     return;
   }
   if (pattern.kind === "PListCons") {

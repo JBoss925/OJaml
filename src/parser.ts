@@ -224,6 +224,7 @@ class Parser {
       return { kind: "PVar", name: token.text, span: { start: token.start, end: token.end } };
     }
     if (this.match("lbrace")) {
+      if (this.match("pipe")) return this.parseCollectionPattern(token.start);
       const fields: Array<{ name: string; nameSpan: { start: number; end: number }; pattern: Pattern }> = [];
       if (!this.at("rbrace")) {
         do {
@@ -270,6 +271,41 @@ class Parser {
       return pattern;
     }
     throw new OJamlError("Expected pattern", token.start, token.end);
+  }
+
+  private parseCollectionPattern(start: number): Pattern {
+    if (this.match("pipe")) {
+      this.expect("rbrace", "Expected '|}' in set pattern");
+      return { kind: "PSet", items: [], span: { start, end: this.previous().end } };
+    }
+    if (this.match("colon")) {
+      this.expect("pipe", "Expected '|}' in empty map pattern");
+      this.expect("rbrace", "Expected '|}' in empty map pattern");
+      return { kind: "PMap", entries: [], span: { start, end: this.previous().end } };
+    }
+
+    const first = this.parsePattern();
+    if (this.match("colon")) {
+      const entries = [{ key: first, value: this.parsePattern() }];
+      while (this.match("semicolon")) {
+        if (this.at("pipe")) break;
+        const key = this.parsePattern();
+        this.expect("colon", "Expected ':' between map key and value pattern");
+        entries.push({ key, value: this.parsePattern() });
+      }
+      this.expect("pipe", "Expected '|}' in map pattern");
+      this.expect("rbrace", "Expected '|}' in map pattern");
+      return { kind: "PMap", entries, span: { start, end: this.previous().end } };
+    }
+
+    const items = [first];
+    while (this.match("semicolon")) {
+      if (this.at("pipe")) break;
+      items.push(this.parsePattern());
+    }
+    this.expect("pipe", "Expected '|}' in set pattern");
+    this.expect("rbrace", "Expected '|}' in set pattern");
+    return { kind: "PSet", items, span: { start, end: this.previous().end } };
   }
 
   private parseBinary(minPrecedence: number): Expr {

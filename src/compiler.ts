@@ -382,6 +382,10 @@ function emitPatternTest(pattern: Pattern, value: string, context: EmitContext):
         return `(i32.and ${test} ${emitPatternTest(item, itemValue, context)})`;
       }, lengthTest);
     }
+    case "PSet":
+      return emitLinkedSetPatternTest(pattern.items, value, context);
+    case "PMap":
+      return emitLinkedMapPatternTest(pattern.entries, value, context);
     case "PListNil":
       return `(i32.eqz ${value})`;
     case "PListCons":
@@ -409,6 +413,21 @@ function emitPatternBindings(pattern: Pattern, value: string): string {
       .filter(Boolean)
       .join("\n  ");
   }
+  if (pattern.kind === "PSet") {
+    return pattern.items
+      .map((item, index) => emitPatternBindings(item, linkedSetValue(linkedOffset(value, index))))
+      .filter(Boolean)
+      .join("\n  ");
+  }
+  if (pattern.kind === "PMap") {
+    return pattern.entries
+      .flatMap((entry, index) => [
+        emitPatternBindings(entry.key, linkedMapKey(linkedMapOffset(value, index))),
+        emitPatternBindings(entry.value, linkedMapValue(linkedMapOffset(value, index))),
+      ])
+      .filter(Boolean)
+      .join("\n  ");
+  }
   if (pattern.kind === "PListCons") {
     return [
       emitPatternBindings(pattern.head, listHead(value)),
@@ -416,6 +435,26 @@ function emitPatternBindings(pattern: Pattern, value: string): string {
     ].filter(Boolean).join("\n  ");
   }
   return "";
+}
+
+function emitLinkedSetPatternTest(items: Pattern[], value: string, context: EmitContext): string {
+  let cursor = value;
+  let test = items.length === 0 ? `(i32.eqz ${cursor})` : `(i32.const 1)`;
+  for (const item of items) {
+    test = `(i32.and ${test} (i32.and (i32.ne ${cursor} (i32.const 0)) ${emitPatternTest(item, linkedSetValue(cursor), context)}))`;
+    cursor = linkedSetTail(cursor);
+  }
+  return `(i32.and ${test} (i32.eqz ${cursor}))`;
+}
+
+function emitLinkedMapPatternTest(entries: Array<{ key: Pattern; value: Pattern }>, value: string, context: EmitContext): string {
+  let cursor = value;
+  let test = entries.length === 0 ? `(i32.eqz ${cursor})` : `(i32.const 1)`;
+  for (const entry of entries) {
+    test = `(i32.and ${test} (i32.and (i32.ne ${cursor} (i32.const 0)) (i32.and ${emitPatternTest(entry.key, linkedMapKey(cursor), context)} ${emitPatternTest(entry.value, linkedMapValue(cursor), context)})))`;
+    cursor = linkedMapTail(cursor);
+  }
+  return `(i32.and ${test} (i32.eqz ${cursor}))`;
 }
 
 function tupleItem(value: string, index: number): string {
@@ -440,6 +479,38 @@ function listHead(value: string): string {
 
 function listTail(value: string): string {
   return `(i32.load (i32.add ${value} (i32.const 4)))`;
+}
+
+function linkedOffset(value: string, index: number): string {
+  let cursor = value;
+  for (let i = 0; i < index; i++) cursor = linkedSetTail(cursor);
+  return cursor;
+}
+
+function linkedMapOffset(value: string, index: number): string {
+  let cursor = value;
+  for (let i = 0; i < index; i++) cursor = linkedMapTail(cursor);
+  return cursor;
+}
+
+function linkedSetValue(value: string): string {
+  return `(i32.load ${value})`;
+}
+
+function linkedSetTail(value: string): string {
+  return `(i32.load (i32.add ${value} (i32.const 4)))`;
+}
+
+function linkedMapKey(value: string): string {
+  return `(i32.load ${value})`;
+}
+
+function linkedMapValue(value: string): string {
+  return `(i32.load (i32.add ${value} (i32.const 4)))`;
+}
+
+function linkedMapTail(value: string): string {
+  return `(i32.load (i32.add ${value} (i32.const 8)))`;
 }
 
 function emitIndirectCall(callee: Expr, args: Expr[], context: EmitContext): string {
@@ -1145,6 +1216,13 @@ function addPatternLocals(pattern: Pattern, locals: Set<string>): void {
   if (pattern.kind === "PTuple") pattern.items.forEach((item) => addPatternLocals(item, locals));
   if (pattern.kind === "PRecord") pattern.fields.forEach((field) => addPatternLocals(field.pattern, locals));
   if (pattern.kind === "PArray") pattern.items.forEach((item) => addPatternLocals(item, locals));
+  if (pattern.kind === "PSet") pattern.items.forEach((item) => addPatternLocals(item, locals));
+  if (pattern.kind === "PMap") {
+    pattern.entries.forEach((entry) => {
+      addPatternLocals(entry.key, locals);
+      addPatternLocals(entry.value, locals);
+    });
+  }
   if (pattern.kind === "PListCons") {
     addPatternLocals(pattern.head, locals);
     addPatternLocals(pattern.tail, locals);
@@ -1159,6 +1237,13 @@ function addPatternBoundNames(pattern: Pattern, bound: Set<string>): void {
   if (pattern.kind === "PTuple") pattern.items.forEach((item) => addPatternBoundNames(item, bound));
   if (pattern.kind === "PRecord") pattern.fields.forEach((field) => addPatternBoundNames(field.pattern, bound));
   if (pattern.kind === "PArray") pattern.items.forEach((item) => addPatternBoundNames(item, bound));
+  if (pattern.kind === "PSet") pattern.items.forEach((item) => addPatternBoundNames(item, bound));
+  if (pattern.kind === "PMap") {
+    pattern.entries.forEach((entry) => {
+      addPatternBoundNames(entry.key, bound);
+      addPatternBoundNames(entry.value, bound);
+    });
+  }
   if (pattern.kind === "PListCons") {
     addPatternBoundNames(pattern.head, bound);
     addPatternBoundNames(pattern.tail, bound);

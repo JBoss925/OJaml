@@ -71,6 +71,8 @@ export type Pattern =
   | { kind: "PTuple"; items: Pattern[]; span: SourceSpan }
   | { kind: "PRecord"; fields: Array<{ name: string; nameSpan: SourceSpan; pattern: Pattern }>; span: SourceSpan }
   | { kind: "PArray"; items: Pattern[]; span: SourceSpan }
+  | { kind: "PSet"; items: Pattern[]; span: SourceSpan }
+  | { kind: "PMap"; entries: Array<{ key: Pattern; value: Pattern }>; span: SourceSpan }
   | { kind: "PListNil"; span: SourceSpan }
   | { kind: "PListCons"; head: Pattern; tail: Pattern; span: SourceSpan }
   | { kind: "PWildcard"; span: SourceSpan }

@@ -251,13 +251,30 @@ let describe_names names =
   | [] -> "none"
   | first :: _ -> String.concat "first " first
 
+let describe_set names =
+  match names with
+  | {| "Grace"; "Ada" |} -> "set has Grace then Ada"
+  | {| |} -> "empty set"
+  | _ -> "other set"
+
+let describe_map years =
+  match years with
+  | {| "Grace": year; "Ada": 1815 |} ->
+      String.concat "Grace born " (to_string year)
+  | {| : |} -> "empty map"
+  | _ -> "other map"
+
 let main =
+  let names = Set.add (Set.add (Set.empty ()) "Ada") "Grace" in
+  let years = Map.set (Map.set (Map.empty ()) "Ada" 1815) "Grace" 1906 in
   let _ = println (describe_count 3) in
   let _ = println (describe_count 1) in
   let _ = println (describe_float 1.5) in
   let _ = println (describe_float 2.0) in
   let _ = println (describe_point (3, 4)) in
-  println (describe_names (List.cons "Ada" (List.cons "Grace" (List.empty ()))))`,
+  let _ = println (describe_names (List.cons "Ada" (List.cons "Grace" (List.empty ())))) in
+  let _ = println (describe_set names) in
+  println (describe_map years)`,
   },
   {
     id: "factorial",

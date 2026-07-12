@@ -12,7 +12,7 @@ OJaml is an OCaml-inspired language implemented in TypeScript and compiled to We
 - Browser editor/playground with Monaco completions, diagnostics, and hover metadata.
 - Node CLI for local compile/run workflows.
 - Reusable package exports for the editor component, examples, compiler, and runtime helpers.
-- Test suite covering parser, checker, runtime, stdlib, closures, high-arity calls, tuples, records, sets, power, runtime access checks, exact editor-example transcripts, and compiler specialization regressions.
+- Test suite covering parser, checker, runtime, stdlib, closures, high-arity calls, tuples, records, sets, maps, structural patterns, power, runtime access checks, exact editor-example transcripts, and compiler specialization regressions.
 
 ## Language Snapshot
 
@@ -39,7 +39,7 @@ Supported language features:
 - Polymorphic functions, including constrained numeric variables displayed as `number -> number` and emitted with concrete int/float call-site specializations
 - `if ... then ... else`
 - OCaml-style `match ... with | pat -> expr`
-- Wildcard, int, float, string, bool, unit, tuple, record, list, fixed-length array, and variable patterns
+- Wildcard, int, float, string, bool, unit, tuple, record, list, fixed-length array, set, map, and variable patterns
 - Zero-based tuple projection with `.0`, `.1`, ... plus pair helpers `fst` and `snd`
 - Polymorphic arrays, lists, sets, maps, tuples and records in heap-backed values, and higher-order collection functions
 - `print : int|float|string -> unit`
@@ -100,7 +100,7 @@ Tuple projection uses zero-based postfix indexes: `point.0`, `point.1`, and so o
 
 Record type declarations use `type person = { name: string; year: int }`. Annotated values such as `let ada : person = { name = "Ada"; year = 1815 }` and annotated function parameters such as `let describe (person : person) = person.name` are checked against the named record shape, then lower to the same structural record layout as unannotated records. Field layout is sorted by label at compile time, so source field order does not affect access, matching, or formatting.
 
-Pattern matching supports primitive literals, unit, wildcard/variable catch-alls, tuple structure, record structure, list structure with `[]` and `head :: tail`, and fixed-length array structure with `[| ... |]`. Tuple, record, list, and array patterns may bind nested values and mix literals with binders. Array patterns match exact lengths, while list empty/cons coverage and catch-all patterns remain the conservative route for exhaustive matches. Structural patterns for sets and maps are intentionally still future work.
+Pattern matching supports primitive literals, unit, wildcard/variable catch-alls, tuple structure, record structure, list structure with `[]` and `head :: tail`, fixed-length array structure with `[| ... |]`, set structure with `{| item; item |}`, and map structure with `{| key: value; key: value |}`. Empty maps use `{| : |}` so they stay distinct from empty sets. Tuple, record, list, array, set, and map patterns may bind nested values and mix literals with binders. Array, set, and map patterns match exact stored lengths, while list empty/cons coverage and catch-all patterns remain the conservative route for exhaustive matches.
 
 ## Prerequisites
 
