@@ -13,6 +13,7 @@ export type TypeDeclaration = {
   kind: "Type";
   name: string;
   nameSpan: SourceSpan;
+  params: Array<{ name: string; span: SourceSpan }>;
   body:
     | { kind: "Record"; fields: Array<{ name: string; nameSpan: SourceSpan; type: TypeExpr }> }
     | { kind: "Variant"; constructors: Array<{ name: string; nameSpan: SourceSpan; payload?: TypeExpr }> };
@@ -21,8 +22,9 @@ export type TypeDeclaration = {
 
 export type TypeExpr =
   | { kind: "TName"; name: string; span: SourceSpan }
+  | { kind: "TVar"; name: string; span: SourceSpan }
   | { kind: "TTuple"; items: TypeExpr[]; span: SourceSpan }
-  | { kind: "TApp"; name: "array" | "list" | "set" | "map"; args: TypeExpr[]; span: SourceSpan }
+  | { kind: "TApp"; name: string; args: TypeExpr[]; span: SourceSpan }
   | { kind: "TRecord"; fields: Array<{ name: string; nameSpan: SourceSpan; type: TypeExpr }>; span: SourceSpan };
 
 export type Declaration = {

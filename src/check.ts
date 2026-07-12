@@ -11,7 +11,7 @@ type Type =
   | { kind: "app"; name: "tuple"; args: Type[] }
   | { kind: "app"; name: "record"; fields: Array<{ name: string; type: Type }> }
   | { kind: "app"; name: "map"; args: [Type, Type] }
-  | { kind: "variant"; name: string }
+  | { kind: "variant"; name: string; args: Type[] }
   | { kind: "fn"; params: Type[]; result: Type };
 
 type Binding = {
@@ -60,7 +60,7 @@ type PendingToken = Omit<CheckedToken, "detail"> & {
 
 type CheckContext = {
   tokens: PendingToken[];
-  types: Map<string, Type>;
+  types: TypeEnvironment;
   constructors: Map<string, ConstructorBinding>;
 };
 
@@ -71,6 +71,12 @@ type ConstructorBinding = {
   payload?: Type;
   tag: number;
 };
+
+type TypeBinding =
+  | { kind: "primitive"; type: Type }
+  | { kind: "declared"; declaration: TypeDeclaration };
+
+type TypeEnvironment = Map<string, TypeBinding>;
 
 let nextTypeVar = 0;
 
@@ -88,7 +94,8 @@ export function check(program: Program): CheckResult {
   const constructors = collectConstructors(typeDeclarations, typeEnv);
   for (const constructor of constructors.values()) {
     if (globals.has(constructor.name)) throw new OJamlError(`Duplicate constructor '${constructor.name}'`, 0, 0);
-    globals.set(constructor.name, { type: constructor.payload ? fn([constructor.payload], constructor.type) : constructor.type });
+    const instance = instantiateConstructor(constructor);
+    globals.set(constructor.name, { type: instance.payload ? fn([instance.payload], instance.type) : instance.type });
   }
   const letDeclarations = program.declarations.filter((declaration): declaration is Declaration => declaration.kind === "Let");
   const context: CheckContext = { tokens: [], types: typeEnv, constructors };
@@ -111,36 +118,45 @@ export function check(program: Program): CheckResult {
   return { mainType: mainType.name, symbols: collectCheckedSymbols(program, globals), tokens: finalizeTokens(context.tokens) };
 }
 
-function collectTypeDeclarations(declarations: TypeDeclaration[]): Map<string, Type> {
-  const types = new Map<string, Type>([
-    ["int", intType],
-    ["float", floatType],
-    ["bool", boolType],
-    ["string", stringType],
-    ["unit", unitType],
+function collectTypeDeclarations(declarations: TypeDeclaration[]): TypeEnvironment {
+  const types = new Map<string, TypeBinding>([
+    ["int", { kind: "primitive", type: intType }],
+    ["float", { kind: "primitive", type: floatType }],
+    ["bool", { kind: "primitive", type: boolType }],
+    ["string", { kind: "primitive", type: stringType }],
+    ["unit", { kind: "primitive", type: unitType }],
   ]);
   for (const declaration of declarations) {
     if (types.has(declaration.name)) throw new OJamlError(`Duplicate type '${declaration.name}'`, declaration.nameSpan.start, declaration.nameSpan.end);
-    types.set(declaration.name, declaration.body.kind === "Record"
-      ? recordType(declaration.body.fields.map((field) => ({ name: field.name, type: resolveTypeExpr(field.type, types) })))
-      : { kind: "variant", name: declaration.name });
+    ensureUniqueTypeParams(declaration);
+    types.set(declaration.name, { kind: "declared", declaration });
+  }
+  for (const declaration of declarations) {
+    const typeVars = typeParamVars(declaration);
+    if (declaration.body.kind === "Record") {
+      declaration.body.fields.forEach((field) => resolveTypeExpr(field.type, types, typeVars));
+    } else {
+      declaration.body.constructors.forEach((constructor) => {
+        if (constructor.payload) resolveTypeExpr(constructor.payload, types, typeVars);
+      });
+    }
   }
   return types;
 }
 
-function collectConstructors(declarations: TypeDeclaration[], types: Map<string, Type>): Map<string, ConstructorBinding> {
+function collectConstructors(declarations: TypeDeclaration[], types: TypeEnvironment): Map<string, ConstructorBinding> {
   const constructors = new Map<string, ConstructorBinding>();
   for (const declaration of declarations) {
     if (declaration.body.kind !== "Variant") continue;
-    const type = types.get(declaration.name);
-    if (!type) continue;
+    const typeVars = typeParamVars(declaration);
+    const type = variantType(declaration.name, declaration.params.map((param) => typeVars.get(param.name)!));
     declaration.body.constructors.forEach((constructor, tag) => {
       if (constructors.has(constructor.name)) throw new OJamlError(`Duplicate constructor '${constructor.name}'`, constructor.nameSpan.start, constructor.nameSpan.end);
       constructors.set(constructor.name, {
         name: constructor.name,
         typeName: declaration.name,
         type,
-        payload: constructor.payload ? resolveTypeExpr(constructor.payload, types) : undefined,
+        payload: constructor.payload ? resolveTypeExpr(constructor.payload, types, typeVars) : undefined,
         tag,
       });
     });
@@ -148,22 +164,59 @@ function collectConstructors(declarations: TypeDeclaration[], types: Map<string,
   return constructors;
 }
 
-function resolveTypeExpr(typeExpr: TypeExpr, types: Map<string, Type>): Type {
-  if (typeExpr.kind === "TName") {
-    const resolved = types.get(typeExpr.name);
-    if (!resolved) throw new OJamlError(`Unknown type '${typeExpr.name}'`, typeExpr.span.start, typeExpr.span.end);
-    return fresh(resolved);
+function resolveTypeExpr(typeExpr: TypeExpr, types: TypeEnvironment, typeVars = new Map<string, Type>()): Type {
+  if (typeExpr.kind === "TVar") {
+    const type = typeVars.get(typeExpr.name);
+    if (!type) throw new OJamlError(`Unknown type parameter '${typeExpr.name}'`, typeExpr.span.start, typeExpr.span.end);
+    return type;
   }
-  if (typeExpr.kind === "TTuple") return app("tuple", typeExpr.items.map((item) => resolveTypeExpr(item, types)));
+  if (typeExpr.kind === "TName") {
+    return resolveNamedType(typeExpr.name, [], types, typeExpr.span, typeVars);
+  }
+  if (typeExpr.kind === "TTuple") return app("tuple", typeExpr.items.map((item) => resolveTypeExpr(item, types, typeVars)));
   if (typeExpr.kind === "TApp") {
     if (typeExpr.name === "map") {
       if (typeExpr.args.length !== 2) throw new OJamlError("Map type expects two type arguments", typeExpr.span.start, typeExpr.span.end);
-      return app("map", [resolveTypeExpr(typeExpr.args[0], types), resolveTypeExpr(typeExpr.args[1], types)]);
+      return app("map", [resolveTypeExpr(typeExpr.args[0], types, typeVars), resolveTypeExpr(typeExpr.args[1], types, typeVars)]);
     }
-    if (typeExpr.args.length !== 1) throw new OJamlError(`${typeExpr.name} type expects one type argument`, typeExpr.span.start, typeExpr.span.end);
-    return app(typeExpr.name, [resolveTypeExpr(typeExpr.args[0], types)]);
+    const args = typeExpr.args.map((arg) => resolveTypeExpr(arg, types, typeVars));
+    if (typeExpr.name === "array" || typeExpr.name === "list" || typeExpr.name === "set") {
+      if (args.length !== 1) throw new OJamlError(`${typeExpr.name} type expects one type argument`, typeExpr.span.start, typeExpr.span.end);
+      return app(typeExpr.name, [args[0]]);
+    }
+    return resolveNamedType(typeExpr.name, args, types, typeExpr.span, typeVars);
   }
-  return recordType(typeExpr.fields.map((field) => ({ name: field.name, type: resolveTypeExpr(field.type, types) })));
+  return recordType(typeExpr.fields.map((field) => ({ name: field.name, type: resolveTypeExpr(field.type, types, typeVars) })));
+}
+
+function resolveNamedType(name: string, args: Type[], types: TypeEnvironment, span: SourceSpan, outerTypeVars: Map<string, Type>): Type {
+  const binding = types.get(name);
+  if (!binding) throw new OJamlError(`Unknown type '${name}'`, span.start, span.end);
+  if (binding.kind === "primitive") {
+    if (args.length !== 0) throw new OJamlError(`Type '${name}' expects 0 type argument(s), got ${args.length}`, span.start, span.end);
+    return binding.type;
+  }
+  const { declaration } = binding;
+  if (args.length !== declaration.params.length) {
+    throw new OJamlError(`Type '${name}' expects ${declaration.params.length} type argument(s), got ${args.length}`, span.start, span.end);
+  }
+  const scoped = new Map(outerTypeVars);
+  declaration.params.forEach((param, index) => scoped.set(param.name, args[index]));
+  return declaration.body.kind === "Record"
+    ? recordType(declaration.body.fields.map((field) => ({ name: field.name, type: resolveTypeExpr(field.type, types, scoped) })))
+    : variantType(declaration.name, args);
+}
+
+function ensureUniqueTypeParams(declaration: TypeDeclaration): void {
+  const seen = new Set<string>();
+  for (const param of declaration.params) {
+    if (seen.has(param.name)) throw new OJamlError(`Duplicate type parameter '${param.name}'`, param.span.start, param.span.end);
+    seen.add(param.name);
+  }
+}
+
+function typeParamVars(declaration: TypeDeclaration): Map<string, Type> {
+  return new Map(declaration.params.map((param): [string, Type] => [param.name, typeVar()]));
 }
 
 export function getStdlibSignatures(): StdlibSignature[] {
@@ -284,7 +337,7 @@ function builtin(name: string, detail: string, createType: () => Type, documenta
   return { name, detail, documentation, createType };
 }
 
-function makeDeclarationStub(declaration: Declaration, types: Map<string, Type>): Type {
+function makeDeclarationStub(declaration: Declaration, types: TypeEnvironment): Type {
   if (declaration.params.length === 0) return typeVar();
   return fn(declaration.params.map((_, index) => declaration.paramAnnotations[index]
     ? resolveTypeExpr(declaration.paramAnnotations[index]!, types)
@@ -381,9 +434,10 @@ function checkExpr(expr: Expr, globals: Map<string, Binding>, locals: Map<string
       }
       const constructor = context.constructors.get(expr.name);
       if (constructor) {
-        if (constructor.payload) throw new OJamlError(`Constructor '${constructor.name}' expects a payload`, expr.span.start, expr.span.end);
-        context.tokens.push({ name: expr.name, kind: "function", type: constructor.type, span: expr.span });
-        return constructor.type;
+        const instance = instantiateConstructor(constructor);
+        if (instance.payload) throw new OJamlError(`Constructor '${constructor.name}' expects a payload`, expr.span.start, expr.span.end);
+        context.tokens.push({ name: expr.name, kind: "function", type: instance.type, span: expr.span });
+        return instance.type;
       }
       const global = globals.get(expr.name);
       if (!global) throw new OJamlError(`Undefined name '${expr.name}'`, expr.span.start, expr.span.end);
@@ -429,15 +483,16 @@ function checkExpr(expr: Expr, globals: Map<string, Binding>, locals: Map<string
       if (expr.callee.kind === "Var") {
         const constructor = context.constructors.get(expr.callee.name);
         if (constructor) {
-          if (!constructor.payload) {
+          const instance = instantiateConstructor(constructor);
+          if (!instance.payload) {
             throw new OJamlError(`Constructor '${constructor.name}' expects 0 argument(s), got ${expr.args.length}`, expr.span.start, expr.span.end);
           }
           if (expr.args.length !== 1) {
             throw new OJamlError(`Constructor '${constructor.name}' expects 1 argument(s), got ${expr.args.length}`, expr.span.start, expr.span.end);
           }
-          unify(checkExpr(expr.args[0], globals, locals, context), fresh(constructor.payload), expr.args[0].span);
-          context.tokens.push({ name: constructor.name, kind: "function", type: fn([constructor.payload], constructor.type), span: expr.callee.span });
-          return constructor.type;
+          unify(checkExpr(expr.args[0], globals, locals, context), instance.payload, expr.args[0].span);
+          context.tokens.push({ name: constructor.name, kind: "function", type: fn([instance.payload], instance.type), span: expr.callee.span });
+          return instance.type;
         }
         const binding = globals.get(expr.callee.name);
         const targetType = resolveVarType(expr.callee, globals, locals);
@@ -705,16 +760,17 @@ function checkPattern(pattern: Pattern, scrutinee: Type, locals: Map<string, Typ
       if (!constructor) {
         throw new OJamlError(`Unknown constructor '${pattern.name}'`, pattern.nameSpan.start, pattern.nameSpan.end);
       }
-      unify(scrutinee, constructor.type, pattern.span);
+      const instance = instantiateConstructor(constructor);
+      unify(scrutinee, instance.type, pattern.span);
       context.tokens.push({
         name: constructor.name,
         kind: "function",
-        type: constructor.payload ? fn([constructor.payload], constructor.type) : constructor.type,
+        type: instance.payload ? fn([instance.payload], instance.type) : instance.type,
         span: pattern.nameSpan,
       });
-      if (constructor.payload) {
+      if (instance.payload) {
         if (!pattern.payload) throw new OJamlError(`Constructor '${constructor.name}' pattern expects a payload`, pattern.nameSpan.start, pattern.nameSpan.end);
-        checkPattern(pattern.payload, constructor.payload, locals, context);
+        checkPattern(pattern.payload, instance.payload, locals, context);
       } else if (pattern.payload) {
         throw new OJamlError(`Constructor '${constructor.name}' pattern does not take a payload`, pattern.payload.span.start, pattern.payload.span.end);
       }
@@ -763,6 +819,10 @@ function app(name: "array" | "list" | "set" | "tuple" | "map", args: Type[]): Ty
 
 function recordType(fields: Array<{ name: string; type: Type }>): Type {
   return { kind: "app", name: "record", fields: [...fields].sort((left, right) => left.name.localeCompare(right.name)) };
+}
+
+function variantType(name: string, args: Type[] = []): Type {
+  return { kind: "variant", name, args };
 }
 
 function fn(params: Type[], result: Type): Type {
@@ -820,6 +880,8 @@ function unify(leftRaw: Type, rightRaw: Type, span: SourceSpan): void {
   }
   if (left.kind === "variant" && right.kind === "variant") {
     if (left.name !== right.name) throw typeMismatch(left, right, span);
+    if (left.args.length !== right.args.length) throw typeMismatch(left, right, span);
+    left.args.forEach((arg, index) => unify(arg, right.args[index], span));
     return;
   }
   if (left.kind === "fn" && right.kind === "fn") {
@@ -843,7 +905,7 @@ function fresh(type: Type, seen = new Map<number, Type>()): Type {
   }
   if (pruned.kind === "prim") return pruned;
   if (pruned.kind === "fn") return fn(pruned.params.map((param) => fresh(param, seen)), fresh(pruned.result, seen));
-  if (pruned.kind === "variant") return pruned;
+  if (pruned.kind === "variant") return variantType(pruned.name, pruned.args.map((arg) => fresh(arg, seen)));
   if (pruned.name === "record") return recordType(pruned.fields.map((field) => ({ name: field.name, type: fresh(field.type, seen) })));
   if (pruned.name === "map") return app("map", [fresh(pruned.args[0], seen), fresh(pruned.args[1], seen)]);
   if (pruned.name === "tuple") return app("tuple", pruned.args.map((arg) => fresh(arg, seen)));
@@ -854,7 +916,7 @@ function occurs(variable: Type, type: Type): boolean {
   const pruned = prune(type);
   if (pruned === variable) return true;
   if (pruned.kind === "fn") return pruned.params.some((param) => occurs(variable, param)) || occurs(variable, pruned.result);
-  if (pruned.kind === "variant") return false;
+  if (pruned.kind === "variant") return pruned.args.some((arg) => occurs(variable, arg));
   if (pruned.kind === "app" && pruned.name === "record") return pruned.fields.some((field) => occurs(variable, field.type));
   if (pruned.kind === "app") return pruned.args.some((arg) => occurs(variable, arg));
   return false;
@@ -873,7 +935,11 @@ function showType(type: Type): string {
     return `'${String.fromCharCode(97 + (pruned.id % 26))}${pruned.id >= 26 ? Math.floor(pruned.id / 26) : ""}`;
   }
   if (pruned.kind === "fn") return `${pruned.params.map(showType).join(" -> ")} -> ${showType(pruned.result)}`;
-  if (pruned.kind === "variant") return pruned.name;
+  if (pruned.kind === "variant") {
+    if (pruned.args.length === 0) return pruned.name;
+    if (pruned.args.length === 1) return `${showType(pruned.args[0])} ${pruned.name}`;
+    return `(${pruned.args.map(showType).join(", ")}) ${pruned.name}`;
+  }
   if (pruned.name === "tuple") return `(${pruned.args.map(showType).join(", ")})`;
   if (pruned.name === "record") return `{ ${pruned.fields.map((field) => `${field.name}: ${showType(field.type)}`).join("; ")} }`;
   if (pruned.name === "map") return `(${showType(pruned.args[0])}, ${showType(pruned.args[1])}) map`;
@@ -882,6 +948,14 @@ function showType(type: Type): string {
 
 function typeMismatch(left: Type, right: Type, span: SourceSpan): OJamlError {
   return new OJamlError(`Type mismatch: ${showType(left)} vs ${showType(right)}`, span.start, span.end);
+}
+
+function instantiateConstructor(constructor: ConstructorBinding): { type: Type; payload?: Type } {
+  const seen = new Map<number, Type>();
+  return {
+    type: fresh(constructor.type, seen),
+    payload: constructor.payload ? fresh(constructor.payload, seen) : undefined,
+  };
 }
 
 function finalizeTokens(tokens: PendingToken[]): CheckedToken[] {
@@ -935,7 +1009,7 @@ function collectCheckedSymbols(program: Program, globals: Map<string, Binding>):
   return symbols;
 }
 
-function collectLocalSymbols(declaration: Declaration, globals: Map<string, Binding>, types: Map<string, Type>, constructors: Map<string, ConstructorBinding>): Array<{ name: string; detail: string; span: SourceSpan }> {
+function collectLocalSymbols(declaration: Declaration, globals: Map<string, Binding>, types: TypeEnvironment, constructors: Map<string, ConstructorBinding>): Array<{ name: string; detail: string; span: SourceSpan }> {
   const binding = globals.get(declaration.name);
   if (!binding) return [];
   const locals = new Map<string, Type>();
@@ -953,7 +1027,7 @@ function collectLocalSymbolsInExpr(
   globals: Map<string, Binding>,
   locals: Map<string, Type>,
   symbols: Array<{ name: string; detail: string; span: SourceSpan }>,
-  types: Map<string, Type>,
+  types: TypeEnvironment,
   constructors: Map<string, ConstructorBinding>,
 ): Type | undefined {
   switch (expr.kind) {
@@ -1081,7 +1155,13 @@ function collectPatternSymbols(
   if (pattern.kind === "PConstructor") {
     if (!pattern.payload) return;
     const constructor = constructors.get(pattern.name);
-    collectPatternSymbols(pattern.payload, constructor?.payload ?? typeVar(), locals, symbols, constructors);
+    if (!constructor) {
+      collectPatternSymbols(pattern.payload, typeVar(), locals, symbols, constructors);
+      return;
+    }
+    const instance = instantiateConstructor(constructor);
+    unify(scrutineeType, instance.type, pattern.span);
+    collectPatternSymbols(pattern.payload, instance.payload ?? typeVar(), locals, symbols, constructors);
     return;
   }
   if (pattern.kind === "PListCons") {

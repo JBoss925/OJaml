@@ -25,6 +25,7 @@ class Parser {
 
   private parseTypeDeclaration(): TypeDeclaration {
     const start = this.expectKeyword("type").start;
+    const params = this.parseTypeParams();
     const nameToken = this.expect("ident", "Expected type name after type");
     this.expect("equals", "Expected '=' in type declaration");
     if (!this.at("lbrace")) {
@@ -40,7 +41,7 @@ class Parser {
       } while (this.at("pipe"));
       if (constructors.length === 0) throw new OJamlError("Expected variant constructor", nameToken.end, nameToken.end);
       this.ensureUniqueFields(constructors.map((constructor) => constructor.name), start, this.previous().end);
-      return { kind: "Type", name: nameToken.text, nameSpan: { start: nameToken.start, end: nameToken.end }, body: { kind: "Variant", constructors }, span: { start, end: this.previous().end } };
+      return { kind: "Type", name: nameToken.text, nameSpan: { start: nameToken.start, end: nameToken.end }, params, body: { kind: "Variant", constructors }, span: { start, end: this.previous().end } };
     }
     this.expect("lbrace", "Expected record type body");
     const fields: Array<{ name: string; nameSpan: { start: number; end: number }; type: TypeExpr }> = [];
@@ -53,7 +54,24 @@ class Parser {
     }
     this.expect("rbrace", "Expected '}' in type declaration");
     this.ensureUniqueFields(fields.map((field) => field.name), start, this.previous().end);
-    return { kind: "Type", name: nameToken.text, nameSpan: { start: nameToken.start, end: nameToken.end }, body: { kind: "Record", fields }, span: { start, end: this.previous().end } };
+    return { kind: "Type", name: nameToken.text, nameSpan: { start: nameToken.start, end: nameToken.end }, params, body: { kind: "Record", fields }, span: { start, end: this.previous().end } };
+  }
+
+  private parseTypeParams(): Array<{ name: string; span: { start: number; end: number } }> {
+    const params: Array<{ name: string; span: { start: number; end: number } }> = [];
+    if (this.at("typevar")) {
+      const param = this.advance();
+      params.push({ name: param.text, span: { start: param.start, end: param.end } });
+      return params;
+    }
+    if (!this.at("lparen") || this.tokens[this.index + 1]?.kind !== "typevar") return params;
+    this.advance();
+    do {
+      const param = this.expect("typevar", "Expected type parameter");
+      params.push({ name: param.text, span: { start: param.start, end: param.end } });
+    } while (this.match("comma"));
+    this.expect("rparen", "Expected ')' after type parameters");
+    return params;
   }
 
   private parseDeclaration(): Declaration {
@@ -130,18 +148,25 @@ class Parser {
 
   private parseTypeExpr(): TypeExpr {
     let type = this.parseTypeAtom();
-    while (this.at("ident") && ["array", "list", "set", "map"].includes(this.peek().text)) {
+    while (this.at("ident") && this.canContinueTypeApplication()) {
       const token = this.advance();
-      const name = token.text as "array" | "list" | "set" | "map";
-      const args = name === "map" && type.kind === "TTuple" && type.items.length === 2 ? type.items : [type];
+      const name = token.text;
+      const args = type.kind === "TTuple" && (name === "map" || !["array", "list", "set"].includes(name)) ? type.items : [type];
       if (name === "map" && args.length !== 2) throw new OJamlError("Map type expects a pair type such as (string, int) map", token.start, token.end);
       type = { kind: "TApp", name, args, span: { start: type.span.start, end: token.end } };
     }
     return type;
   }
 
+  private canContinueTypeApplication(): boolean {
+    const text = this.peek().text;
+    if (["array", "list", "set", "map"].includes(text)) return true;
+    return !["int", "float", "bool", "string", "unit"].includes(text);
+  }
+
   private parseTypeAtom(): TypeExpr {
     const token = this.peek();
+    if (this.match("typevar")) return { kind: "TVar", name: token.text, span: { start: token.start, end: token.end } };
     if (this.match("ident")) return { kind: "TName", name: token.text, span: { start: token.start, end: token.end } };
     if (this.match("lparen")) {
       const first = this.parseTypeExpr();

@@ -182,22 +182,29 @@ let main =
   {
     id: "variants",
     title: "Algebraic Data Types",
-    source: `type status = Pending | Done of int | Failed of string
+    source: `type 'a option = None | Some of 'a
+type ('ok, 'err) result = Ok of 'ok | Error of 'err
 
-let score status =
-  match status with
-  | Pending -> 0
-  | Done value -> value
-  | Failed message -> String.length message
+let score maybe =
+  match maybe with
+  | None -> 0
+  | Some value -> value
+
+let label result =
+  match result with
+  | Ok name -> String.length name
+  | Error code -> code
 
 let main =
-  let pending = score Pending in
-  let done = score (Done 42) in
-  let failed = score (Failed "oops") in
-  let _ = println (String.concat "pending = " (to_string pending)) in
-  let _ = println (String.concat "done = " (to_string done)) in
-  let _ = println (String.concat "failed = " (to_string failed)) in
-  pending + done + failed`,
+  let number : int option = Some 42 in
+  let missing : string option = None in
+  let ok : (string, int) result = Ok "Ada" in
+  let error : (string, int) result = Error 5 in
+  let _ = println (String.concat "score number = " (to_string (score number))) in
+  let _ = println (match missing with | None -> "missing = none" | Some text -> String.concat "missing = " text) in
+  let _ = println (String.concat "label ok = " (to_string (label ok))) in
+  let _ = println (String.concat "label error = " (to_string (label error))) in
+  score number + label ok + label error`,
   },
   {
     id: "type-inference",

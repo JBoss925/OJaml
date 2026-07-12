@@ -54,6 +54,7 @@ export function configureOJamlMonaco(monaco: Monaco): void {
         [/\(\*/, "comment", "@comment"],
         [/"([^"\\]|\\.)*$/, "string.invalid"],
         [/"/, "string", "@string"],
+        [/'[a-zA-Z_][a-zA-Z0-9_]*/, "type.identifier"],
         [/[a-zA-Z_][a-zA-Z0-9_'.]*/, { cases: { "@keywords": "keyword", "@default": "identifier" } }],
         [/\d+\.\d+/, "number.float"],
         [/\d+/, "number"],
@@ -82,6 +83,7 @@ export function configureOJamlMonaco(monaco: Monaco): void {
     rules: [
       { token: "comment", foreground: "777777" },
       { token: "keyword", foreground: "8ee0ad" },
+      { token: "type.identifier", foreground: "b8e6ff" },
       { token: "number", foreground: "f3d084" },
       { token: "operator", foreground: "d8d8d3" },
       { token: "identifier", foreground: "f4f4f2" },
@@ -105,6 +107,7 @@ export function configureOJamlMonaco(monaco: Monaco): void {
     rules: [
       { token: "comment", foreground: "66726a" },
       { token: "keyword", foreground: "20382d", fontStyle: "bold" },
+      { token: "type.identifier", foreground: "155e75" },
       { token: "number", foreground: "8c5a14" },
       { token: "operator", foreground: "1e2420" },
     ],
@@ -358,6 +361,7 @@ function lexicalHover(token: Token): SymbolInfo | undefined {
   if (token.kind === "keyword") return { name: token.text, kind: "keyword", detail: `${token.text} keyword`, span: token };
   if (token.kind === "int") return { name: token.text, kind: "literal", detail: `${token.text} : int`, span: token };
   if (token.kind === "string") return { name: "string literal", kind: "literal", detail: "string literal : string", span: token };
+  if (token.kind === "typevar") return { name: token.text, kind: "value", detail: `${token.text} type parameter`, span: token };
   if (token.kind === "operator" || token.kind === "equals" || token.kind === "arrow" || token.kind === "pipe") {
     return { name: token.text, kind: "operator", detail: `${token.text} operator`, span: token };
   }

@@ -120,6 +120,22 @@ let main =
   assert.equal(main.value.arms[1].pattern.kind, "PConstructor");
 });
 
+test("parses polymorphic algebraic data type declarations and applications", () => {
+  const ast = parse(`type ('a, 'b) result = Ok of 'a | Error of 'b
+
+let main =
+  match Ok 42 with
+  | Ok value -> value
+  | Error message -> String.length message`);
+  const typeDeclaration = ast.declarations[0];
+
+  assert.equal(typeDeclaration.kind, "Type");
+  if (typeDeclaration.kind !== "Type") return;
+  assert.deepEqual(typeDeclaration.params.map((param) => param.name), ["'a", "'b"]);
+  assert.equal(typeDeclaration.body.kind, "Variant");
+  assert.equal(typeDeclaration.body.kind === "Variant" ? typeDeclaration.body.constructors[0].payload?.kind : undefined, "TVar");
+});
+
 test("parses empty and cons list patterns as right-associative patterns", () => {
   const ast = parse(`let main =
   match List.empty () with
@@ -1148,6 +1164,59 @@ test("algebraic data types reject bad constructors and payload mismatches", () =
   }
 });
 
+test("polymorphic algebraic data types instantiate constructors per use", async () => {
+  const result = await runOJaml(`type 'a option = None | Some of 'a
+type ('ok, 'err) result = Ok of 'ok | Error of 'err
+
+let score maybe =
+  match maybe with
+  | None -> 0
+  | Some value -> value
+
+let label result =
+  match result with
+  | Ok name -> String.length name
+  | Error code -> code
+
+let main =
+  let number : int option = Some 42 in
+  let missing : string option = None in
+  let named : (string, int) result = Ok "Ada" in
+  let failed : (string, int) result = Error 5 in
+  score number + label named + label failed + (match missing with | None -> 1 | Some text -> String.length text)`);
+
+  assert.equal(result.value, 51);
+});
+
+test("polymorphic record type declarations preserve their field parameter types", async () => {
+  const result = await runOJaml(`type 'a box = { value: 'a }
+type 'a option = None | Some of 'a
+
+let main =
+  let number : int box = { value = 7 } in
+  let word : string box = { value = "ojaml" } in
+  let maybe : int option box = { value = Some 4 } in
+  let nested = match maybe.value with | Some value -> value | None -> 0 in
+  number.value + String.length word.value + nested`);
+
+  assert.equal(result.value, 16);
+});
+
+test("polymorphic algebraic data types reject bad arities and mismatched parameters", () => {
+  const cases = [
+    `type 'a option = None | Some of 'a\nlet main = let value : option = Some 1 in 0`,
+    `type 'a option = None | Some of 'a\nlet main = let value : (int, string) option = Some 1 in 0`,
+    `type 'a option = None | Some of 'a\nlet main = let value : int option = Some "one" in 0`,
+    `type 'a option = None | Some of 'b\nlet main = 0`,
+    `type ('a, 'a) pair = Pair of ('a, 'a)\nlet main = 0`,
+    `type 'a option = None | Some of 'a\nlet main = match Some 1 with | Some "one" -> 1 | _ -> 0`,
+  ];
+
+  for (const source of cases) {
+    assert.ok(getOJamlSyntaxMarkers(source, 8).length > 0, source);
+  }
+});
+
 test("fst and snd project pair elements with precise types", async () => {
   const result = await runOJaml(`let main =
   let point = (3, 4) in
@@ -1602,7 +1671,7 @@ const expectedExampleResults: Map<string, { mainType: string; value: number; out
   ["sets", { mainType: "int", value: 2, output: "names = { Grace, Ada }\nhas Ada = true\n" }],
   ["tuples", { mainType: "int", value: 9, output: "point = (3, 4, 5)\nx = 3\ny = 4\nz = 5\nx + y = 7\nlabeled = (origin, (3, 4, 5))\npoints = [(3, 4, 5), (0, 0, 0)]\n" }],
   ["records", { mainType: "int", value: 1817, output: "ada = { active = true; name = Ada; year = 1815 }\nada.name = Ada\nlabel = Ada 1815\npeople = [{ active = true; name = Ada; year = 1815 }, { active = true; name = Grace; year = 1906 }]\n" }],
-  ["variants", { mainType: "int", value: 46, output: "pending = 0\ndone = 42\nfailed = 4\n" }],
+  ["variants", { mainType: "int", value: 50, output: "score number = 42\nmissing = none\nlabel ok = 3\nlabel error = 5\n" }],
   ["type-inference", { mainType: "int", value: 87, output: "square 9 = 81\nsquare 2.5 = 6.25\n" }],
   ["local-recursion", { mainType: "int", value: 15, output: "values = [4, 5, 6]\nsum = 15\n" }],
   ["high-arity-functions", { mainType: "int", value: 3744, output: "values = [4]\nperson = { name = Grace; year = 1906 }\nresult = 3744\n" }],
@@ -1863,6 +1932,24 @@ let main =
   assert.equal(doneToken?.detail, "Done : int -> status");
   assert.equal(mainLocals.get("value"), "value : int");
   assert.equal(mainLocals.get("message"), "message : string");
+});
+
+test("checker exposes polymorphic algebraic data type constructor hovers", () => {
+  const source = `type 'a option = None | Some of 'a
+
+let main =
+  match Some "Ada" with
+  | None -> 0
+  | Some name -> String.length name`;
+  const checked = check(parse(source));
+  const symbols = new Map(checked.symbols.map((symbol) => [symbol.name, symbol.detail]));
+  const mainLocals = new Map(checked.symbols.find((symbol) => symbol.name === "main")?.locals?.map((symbol) => [symbol.name, symbol.detail]));
+  const someToken = checked.tokens.find((token) => token.name === "Some");
+
+  assert.match(symbols.get("None") ?? "", /None : '.* option/);
+  assert.match(symbols.get("Some") ?? "", /Some : '.* -> '.* option/);
+  assert.equal(someToken?.detail, "Some : string -> string option");
+  assert.equal(mainLocals.get("name"), "name : string");
 });
 
 test("checker exposes local let rec function types for hovers", () => {

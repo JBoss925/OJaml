@@ -11,7 +11,7 @@ This matrix tracks features currently implemented by the parser, checker, WASM b
 | Integers, floats, booleans, strings, unit | yes | Hello, Language Tour |
 | Tuple expressions | yes | Tuples |
 | Structural record expressions and field access | yes | Records |
-| Record and algebraic data type declarations plus value and function parameter annotations | yes | Records, Algebraic Data Types |
+| Record and algebraic data type declarations, including type parameters, plus value and function parameter annotations | yes | Records, Algebraic Data Types |
 | Tuple projection with `.0`, `.1`, ... plus pair helpers `fst`/`snd` | yes | Tuples |
 | String escapes | yes | test suite |
 | Integer and float arithmetic, power, comparison, boolean, unary operators | yes | Language Tour |
@@ -37,9 +37,10 @@ This matrix tracks features currently implemented by the parser, checker, WASM b
 | `Set.empty/add/has/length` | yes | Sets |
 | Polymorphic maps | yes | Collections, Language Tour |
 | `Map.empty/set/get/has` | yes | Collections |
+| Polymorphic algebraic data type parameters | yes | Algebraic Data Types |
 | Runtime access checks for arrays/lists/maps | yes | test suite |
 | Monaco parser/type diagnostics | yes | editor |
 | Negative type diagnostics across primitives and stdlib calls | yes | test suite |
 | Exact editor-example output transcripts | yes | all examples |
 
-Not yet implemented: polymorphic algebraic data type parameters, modules/import syntax, exceptions, garbage collection, and recoverable language-level runtime exceptions.
+Not yet implemented: modules/import syntax, exceptions, garbage collection, and recoverable language-level runtime exceptions.

@@ -5,6 +5,7 @@ export type TokenKind =
   | "float"
   | "string"
   | "ident"
+  | "typevar"
   | "keyword"
   | "operator"
   | "lparen"
@@ -77,6 +78,13 @@ export function lex(source: string): Token[] {
       while (/[A-Za-z0-9_'.]/.test(source[i] ?? "")) i++;
       const text = source.slice(start, i);
       tokens.push({ kind: keywords.has(text) ? "keyword" : "ident", text, start, end: i });
+      continue;
+    }
+
+    if (ch === "'" && /[A-Za-z_]/.test(source[i + 1] ?? "")) {
+      i += 2;
+      while (/[A-Za-z0-9_]/.test(source[i] ?? "")) i++;
+      tokens.push({ kind: "typevar", text: source.slice(start, i), start, end: i });
       continue;
     }
 
