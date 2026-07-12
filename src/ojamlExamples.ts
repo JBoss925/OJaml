@@ -120,6 +120,18 @@ export const ojamlExamples: OJamlExample[] = [
   Set.length names`,
   },
   {
+    id: "tuples",
+    title: "Tuples",
+    source: `let main =
+  let point = (3, 4) in
+  let labeled = ("origin", point) in
+  let points = List.cons point (List.cons (0, 0) (List.empty ())) in
+  let _ = println (String.concat "point = " (to_string point)) in
+  let _ = println (String.concat "labeled = " (to_string labeled)) in
+  let _ = println (String.concat "points = " (to_string points)) in
+  List.length points`,
+  },
+  {
     id: "type-inference",
     title: "Type Inference",
     source: `let square x = x ** 2

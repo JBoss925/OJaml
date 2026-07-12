@@ -12,7 +12,7 @@ OJaml is an OCaml-inspired language implemented in TypeScript and compiled to We
 - Browser editor/playground with Monaco completions, diagnostics, and hover metadata.
 - Node CLI for local compile/run workflows.
 - Reusable package exports for the editor component, examples, compiler, and runtime helpers.
-- Test suite covering parser, checker, runtime, stdlib, closures, sets, power, runtime access checks, exact editor-example transcripts, and compiler specialization regressions.
+- Test suite covering parser, checker, runtime, stdlib, closures, tuples, sets, power, runtime access checks, exact editor-example transcripts, and compiler specialization regressions.
 
 ## Language Snapshot
 
@@ -33,16 +33,16 @@ Supported language features:
 - `let` and `let rec` top-level bindings
 - Local `let ... in ...`
 - Anonymous functions and first-class function values
-- Integers, floats, booleans, strings, and unit
+- Integers, floats, booleans, strings, unit, and tuples
 - Integer and float arithmetic, right-associative power `**`, comparison, equality, boolean, and integer `mod` operators
 - Polymorphic functions, including constrained numeric variables displayed as `number -> number` and emitted with concrete int/float call-site specializations
 - `if ... then ... else`
 - OCaml-style `match ... with | pat -> expr`
 - Wildcard, int, float, string, bool, unit, and variable patterns
-- Polymorphic arrays, lists, sets, maps, and higher-order collection functions
+- Polymorphic arrays, lists, sets, maps, tuples in heap-backed values, and higher-order collection functions
 - `print : int|float|string -> unit`
 - `println : int|float|string -> unit`
-- `to_string : 'a -> string`, including recursive formatting for arrays, lists, sets, maps, and functions
+- `to_string : 'a -> string`, including recursive formatting for tuples, arrays, lists, sets, maps, and functions
 - `main` must be a zero-argument value and may return `int`, `float`, `bool`, or `unit` directly. Strings and heap values should be printed, converted with `to_string`, or reduced to a direct result type.
 
 ## Standard Library Surface
@@ -90,7 +90,7 @@ Map.has : ('k, 'v) map -> 'k -> bool
 
 All standard-library functions have explicit type schemes so editor hovers, type errors, and autocomplete remain statically meaningful.
 
-`print` appends text directly to the captured output stream; `println` appends a trailing newline. `to_string` formats primitives, arrays, lists, sets, maps, and functions. Unknown heap-backed values fall back to `Object <ptr>`, and function values format as `Function <ptr>`.
+`print` appends text directly to the captured output stream; `println` appends a trailing newline. `to_string` formats primitives, tuples, arrays, lists, sets, maps, and functions. Unknown heap-backed values fall back to `Object <ptr>`, and function values format as `Function <ptr>`.
 
 ## Prerequisites
 
@@ -184,7 +184,7 @@ import "ojaml/styles.css";
 
 ## Runtime Model
 
-The WebAssembly backend uses a uniform `i32` representation. Integers and booleans are immediate values; unit is zero; heap-backed values such as floats, strings, arrays, lists, sets, maps, and closures are represented as pointers. Float arithmetic and power unbox operands to `f64`; `int ** int` returns an int, while any float operand makes `**` return a boxed float. Polymorphic top-level functions receive concrete int/float specializations when call sites require different runtime representations. The checker is responsible for rejecting invalid programs before emission.
+The WebAssembly backend uses a uniform `i32` representation. Integers and booleans are immediate values; unit is zero; heap-backed values such as floats, strings, tuples, arrays, lists, sets, maps, and closures are represented as pointers. Tuple blocks store their element count followed by one `i32` slot per element. Float arithmetic and power unbox operands to `f64`; `int ** int` returns an int, while any float operand makes `**` return a boxed float. Polymorphic top-level functions receive concrete int/float specializations when call sites require different runtime representations. The checker is responsible for rejecting invalid programs before emission.
 
 Runtime collection helpers trap invalid access: negative array lengths, out-of-bounds array reads/writes, empty-list head/tail, and missing `Map.get` keys do not silently read arbitrary memory. Current runtime limits are still intentional: allocation is bump-pointer based, there is no garbage collector, and traps are not yet recoverable language-level exceptions.
 

@@ -24,6 +24,7 @@ export type Expr =
   | { kind: "String"; value: string; span: SourceSpan }
   | { kind: "Bool"; value: boolean; span: SourceSpan }
   | { kind: "Unit"; span: SourceSpan }
+  | { kind: "Tuple"; items: Expr[]; span: SourceSpan }
   | { kind: "Var"; name: string; span: SourceSpan }
   | { kind: "Unary"; op: "-"; expr: Expr; span: SourceSpan }
   | { kind: "Binary"; op: BinaryOp; left: Expr; right: Expr; span: SourceSpan }

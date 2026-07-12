@@ -159,8 +159,19 @@ function formatValue(memory: WebAssembly.Memory, value: number, descriptor: stri
     }
     return `{ ${items.join(", ")} }`;
   }
+  if (descriptor.startsWith("tuple(") && descriptor.endsWith(")")) {
+    const elementDescriptors = splitDescriptors(descriptor.slice("tuple(".length, -1));
+    const view = new DataView(memory.buffer);
+    const length = view.getInt32(value, true);
+    const items: string[] = [];
+    for (let index = 0; index < length; index++) {
+      const item = view.getInt32(value + 4 + index * 4, true);
+      items.push(formatValue(memory, item, elementDescriptors[index] ?? "unknown"));
+    }
+    return `(${items.join(", ")})`;
+  }
   if (descriptor.startsWith("map(") && descriptor.endsWith(")")) {
-    const [keyDescriptor, valueDescriptor] = splitMapDescriptor(descriptor.slice("map(".length, -1));
+    const [keyDescriptor, valueDescriptor] = splitDescriptors(descriptor.slice("map(".length, -1));
     const view = new DataView(memory.buffer);
     const items: string[] = [];
     let cursor = value;
@@ -175,13 +186,19 @@ function formatValue(memory: WebAssembly.Memory, value: number, descriptor: stri
   return `Object ${value}`;
 }
 
-function splitMapDescriptor(value: string): [string, string] {
+function splitDescriptors(value: string): string[] {
+  const parts: string[] = [];
   let depth = 0;
+  let start = 0;
   for (let index = 0; index < value.length; index++) {
     const ch = value[index];
     if (ch === "(") depth++;
     else if (ch === ")") depth--;
-    else if (ch === "," && depth === 0) return [value.slice(0, index), value.slice(index + 1)];
+    else if (ch === "," && depth === 0) {
+      parts.push(value.slice(start, index));
+      start = index + 1;
+    }
   }
-  return [value, "unknown"];
+  parts.push(value.slice(start));
+  return parts;
 }

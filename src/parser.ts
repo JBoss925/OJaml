@@ -182,6 +182,14 @@ class Parser {
     if (this.match("lparen")) {
       if (this.match("rparen")) return { kind: "Unit", span: { start: token.start, end: this.previous().end } };
       const expr = this.parseExpr();
+      if (this.match("comma")) {
+        const items = [expr];
+        do {
+          items.push(this.parseExpr());
+        } while (this.match("comma"));
+        this.expect("rparen", "Expected ')'");
+        return { kind: "Tuple", items, span: { start: token.start, end: this.previous().end } };
+      }
       this.expect("rparen", "Expected ')'");
       return expr;
     }

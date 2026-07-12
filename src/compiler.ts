@@ -115,6 +115,7 @@ function emitDeclaration(
 class EmitContext {
   private matchId = 0;
   private callId = 0;
+  private tupleId = 0;
 
   constructor(
     readonly globals: Map<string, number>,
@@ -132,6 +133,10 @@ class EmitContext {
 
   nextCallLocal(): string {
     return `__callee${this.callId++}`;
+  }
+
+  nextTupleLocal(): string {
+    return `__tuple${this.tupleId++}`;
   }
 
   exprType(expr: Expr): ValueShape {
@@ -153,6 +158,8 @@ function emitExpr(expr: Expr, context: EmitContext): string {
       return `(i32.const ${expr.value ? 1 : 0})`;
     case "Unit":
       return `(i32.const 0)`;
+    case "Tuple":
+      return emitTuple(expr, context);
     case "Var":
       if (context.locals.has(expr.name)) return `(local.get $${safe(expr.name)})`;
       if (context.captured.has(expr.name)) return `(i32.load (i32.add (local.get $__env) (i32.const ${4 + context.captured.get(expr.name)! * 4})))`;
@@ -223,6 +230,17 @@ function emitExpr(expr: Expr, context: EmitContext): string {
 )`;
     }
   }
+}
+
+function emitTuple(expr: Extract<Expr, { kind: "Tuple" }>, context: EmitContext): string {
+  const local = context.nextTupleLocal();
+  const stores = expr.items.map((item, index) => `(i32.store (i32.add (local.get $${local}) (i32.const ${4 + index * 4})) ${emitExpr(item, context)})`).join("\n  ");
+  return `(block (result i32)
+  (local.set $${local} (call $alloc (i32.const ${4 + expr.items.length * 4})))
+  (i32.store (local.get $${local}) (i32.const ${expr.items.length}))
+  ${stores}
+  (local.get $${local})
+)`;
 }
 
 function emitBinary(expr: Extract<Expr, { kind: "Binary" }>, context: EmitContext): string {
@@ -391,6 +409,7 @@ function collectLocals(declaration: Declaration): Set<string> {
   const locals = new Set<string>();
   locals.add("__closure");
   addCallScratchLocals(locals);
+  addTupleScratchLocals(locals);
   walk(declaration.value, locals, { matchId: 0 });
   return locals;
 }
@@ -398,6 +417,7 @@ function collectLocals(declaration: Declaration): Set<string> {
 function collectLocalsFromExpr(expr: Expr): Set<string> {
   const locals = new Set<string>(["__closure"]);
   addCallScratchLocals(locals);
+  addTupleScratchLocals(locals);
   walk(expr, locals, { matchId: 0 });
   return locals;
 }
@@ -406,9 +426,14 @@ function addCallScratchLocals(locals: Set<string>): void {
   for (let i = 0; i < 16; i++) locals.add(`__callee${i}`);
 }
 
+function addTupleScratchLocals(locals: Set<string>): void {
+  for (let i = 0; i < 16; i++) locals.add(`__tuple${i}`);
+}
+
 type ValueShape =
   | { kind: "int" | "float" | "bool" | "string" | "unit" | "unknown" }
   | { kind: "array" | "list" | "set"; elem: ValueShape }
+  | { kind: "tuple"; items: ValueShape[] }
   | { kind: "map"; key: ValueShape; value: ValueShape }
   | { kind: "fn"; result: ValueShape };
 
@@ -476,9 +501,32 @@ function shapeFromTypeText(type: string): ValueShape {
   if (type.endsWith(" array")) return { kind: "array", elem: shapeFromTypeText(type.slice(0, -" array".length).trim()) };
   if (type.endsWith(" list")) return { kind: "list", elem: shapeFromTypeText(type.slice(0, -" list".length).trim()) };
   if (type.endsWith(" set")) return { kind: "set", elem: shapeFromTypeText(type.slice(0, -" set".length).trim()) };
-  const mapMatch = /^\((.*), (.*)\) map$/.exec(type);
-  if (mapMatch) return { kind: "map", key: shapeFromTypeText(mapMatch[1]), value: shapeFromTypeText(mapMatch[2]) };
+  if (type.startsWith("(") && type.endsWith(") map")) {
+    const parts = splitTopLevelComma(type.slice(1, -" map".length - 1));
+    if (parts.length === 2) return { kind: "map", key: shapeFromTypeText(parts[0].trim()), value: shapeFromTypeText(parts[1].trim()) };
+  }
+  if (type.startsWith("(") && type.endsWith(")")) {
+    const parts = splitTopLevelComma(type.slice(1, -1));
+    if (parts.length > 1) return { kind: "tuple", items: parts.map((part) => shapeFromTypeText(part.trim())) };
+  }
   return unknownShape;
+}
+
+function splitTopLevelComma(value: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let index = 0; index < value.length; index++) {
+    const ch = value[index];
+    if (ch === "(") depth++;
+    else if (ch === ")") depth--;
+    else if (ch === "," && depth === 0) {
+      parts.push(value.slice(start, index));
+      start = index + 1;
+    }
+  }
+  parts.push(value.slice(start));
+  return parts;
 }
 
 function typeDescriptor(shape: ValueShape): string {
@@ -489,6 +537,8 @@ function typeDescriptor(shape: ValueShape): string {
       return `list(${typeDescriptor(shape.elem)})`;
     case "set":
       return `set(${typeDescriptor(shape.elem)})`;
+    case "tuple":
+      return `tuple(${shape.items.map(typeDescriptor).join(",")})`;
     case "map":
       return `map(${typeDescriptor(shape.key)},${typeDescriptor(shape.value)})`;
     case "fn":
@@ -649,6 +699,9 @@ function walkTypes(expr: Expr, types: Map<string, ValueShape>): void {
       walkTypes(expr.left, types);
       walkTypes(expr.right, types);
       break;
+    case "Tuple":
+      expr.items.forEach((item) => walkTypes(item, types));
+      break;
     case "Unary":
       walkTypes(expr.expr, types);
       break;
@@ -681,6 +734,8 @@ function inferSimpleType(expr: Expr, types: Map<string, ValueShape>): ValueShape
       return boolShape;
     case "Unit":
       return unitShape;
+    case "Tuple":
+      return { kind: "tuple", items: expr.items.map((item) => inferSimpleType(item, types)) };
     case "Var":
       return types.get(expr.name) ?? intShape;
     case "If":
@@ -779,6 +834,9 @@ function walk(expr: Expr, locals: Set<string>, state: { matchId: number }): void
       walk(expr.left, locals, state);
       walk(expr.right, locals, state);
       break;
+    case "Tuple":
+      expr.items.forEach((item) => walk(item, locals, state));
+      break;
     case "Unary":
       walk(expr.expr, locals, state);
       break;
@@ -818,6 +876,9 @@ function freeVars(expr: Expr, bound: Set<string>): Set<string> {
     case "Binary":
       addAll(freeVars(expr.left, bound));
       addAll(freeVars(expr.right, bound));
+      break;
+    case "Tuple":
+      expr.items.forEach((item) => addAll(freeVars(item, bound)));
       break;
     case "If":
       addAll(freeVars(expr.condition, bound));

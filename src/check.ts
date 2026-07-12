@@ -1,13 +1,14 @@
 import type { Declaration, Expr, Pattern, Program, SourceSpan } from "./ast";
 import { OJamlError } from "./errors";
 
-export type OJamlType = "int" | "float" | "bool" | "string" | "unit" | "array" | "list" | "set" | "map" | "fn";
+export type OJamlType = "int" | "float" | "bool" | "string" | "unit" | "tuple" | "array" | "list" | "set" | "map" | "fn";
 export type RuntimeMainType = "int" | "float" | "bool" | "unit";
 
 type Type =
-  | { kind: "prim"; name: Exclude<OJamlType, "array" | "list" | "set" | "map" | "fn"> }
+  | { kind: "prim"; name: Exclude<OJamlType, "tuple" | "array" | "list" | "set" | "map" | "fn"> }
   | { kind: "var"; id: number; instance?: Type; numeric?: boolean }
   | { kind: "app"; name: "array" | "list" | "set"; args: [Type] }
+  | { kind: "app"; name: "tuple"; args: Type[] }
   | { kind: "app"; name: "map"; args: [Type, Type] }
   | { kind: "fn"; params: Type[]; result: Type };
 
@@ -250,6 +251,11 @@ function checkExpr(expr: Expr, globals: Map<string, Binding>, locals: Map<string
     case "Unit":
       context.tokens.push({ name: "()", kind: "literal", type: unitType, span: expr.span });
       return unitType;
+    case "Tuple": {
+      const type = app("tuple", expr.items.map((item) => checkExpr(item, globals, locals, context)));
+      context.tokens.push({ name: "tuple", kind: "literal", type, span: expr.span });
+      return type;
+    }
     case "Var": {
       const local = locals.get(expr.name);
       if (local) {
@@ -484,16 +490,17 @@ function sameBranches(left: Type, right: Type, span: SourceSpan): Type {
   return left;
 }
 
-function prim(name: Exclude<OJamlType, "array" | "list" | "set" | "map" | "fn">): Type {
+function prim(name: Exclude<OJamlType, "tuple" | "array" | "list" | "set" | "map" | "fn">): Type {
   return { kind: "prim", name };
 }
 
 function app(name: "array" | "list" | "set", args: [Type]): Type;
+function app(name: "tuple", args: Type[]): Type;
 function app(name: "map", args: [Type, Type]): Type;
-function app(name: "array" | "list" | "set" | "map", args: Type[]): Type {
-  return name === "map"
-    ? { kind: "app", name, args: args as [Type, Type] }
-    : { kind: "app", name, args: args as [Type] };
+function app(name: "array" | "list" | "set" | "tuple" | "map", args: Type[]): Type {
+  if (name === "map") return { kind: "app", name, args: args as [Type, Type] };
+  if (name === "tuple") return { kind: "app", name, args };
+  return { kind: "app", name, args: args as [Type] };
 }
 
 function fn(params: Type[], result: Type): Type {
@@ -560,9 +567,9 @@ function fresh(type: Type, seen = new Map<number, Type>()): Type {
   }
   if (pruned.kind === "prim") return pruned;
   if (pruned.kind === "fn") return fn(pruned.params.map((param) => fresh(param, seen)), fresh(pruned.result, seen));
-  return pruned.name === "map"
-    ? app("map", [fresh(pruned.args[0], seen), fresh(pruned.args[1], seen)])
-    : app(pruned.name, [fresh(pruned.args[0], seen)]);
+  if (pruned.name === "map") return app("map", [fresh(pruned.args[0], seen), fresh(pruned.args[1], seen)]);
+  if (pruned.name === "tuple") return app("tuple", pruned.args.map((arg) => fresh(arg, seen)));
+  return app(pruned.name, [fresh(pruned.args[0], seen)]);
 }
 
 function occurs(variable: Type, type: Type): boolean {
@@ -586,6 +593,7 @@ function showType(type: Type): string {
     return `'${String.fromCharCode(97 + (pruned.id % 26))}${pruned.id >= 26 ? Math.floor(pruned.id / 26) : ""}`;
   }
   if (pruned.kind === "fn") return `${pruned.params.map(showType).join(" -> ")} -> ${showType(pruned.result)}`;
+  if (pruned.name === "tuple") return `(${pruned.args.map(showType).join(", ")})`;
   if (pruned.name === "map") return `(${showType(pruned.args[0])}, ${showType(pruned.args[1])}) map`;
   return `${showType(pruned.args[0])} ${pruned.name}`;
 }
@@ -674,6 +682,9 @@ function collectLocalSymbolsInExpr(
       return undefined;
     case "Unary":
       collectLocalSymbolsInExpr(expr.expr, globals, locals, symbols);
+      return undefined;
+    case "Tuple":
+      expr.items.forEach((item) => collectLocalSymbolsInExpr(item, globals, locals, symbols));
       return undefined;
     case "Call":
       collectLocalSymbolsInExpr(expr.callee, globals, locals, symbols);

@@ -9,6 +9,7 @@ export type TokenKind =
   | "operator"
   | "lparen"
   | "rparen"
+  | "comma"
   | "pipe"
   | "arrow"
   | "equals"
@@ -90,6 +91,7 @@ export function lex(source: string): Token[] {
 
     if (ch === "(") tokens.push({ kind: "lparen", text: ch, start, end: ++i });
     else if (ch === ")") tokens.push({ kind: "rparen", text: ch, start, end: ++i });
+    else if (ch === ",") tokens.push({ kind: "comma", text: ch, start, end: ++i });
     else if (ch === "|") tokens.push({ kind: "pipe", text: ch, start, end: ++i });
     else if (ch === "=") tokens.push({ kind: "equals", text: ch, start, end: ++i });
     else if (symbolicOperators.has(ch)) tokens.push({ kind: "operator", text: ch, start, end: ++i });

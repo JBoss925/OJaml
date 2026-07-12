@@ -8,6 +8,7 @@ This matrix tracks features currently implemented by the parser, checker, WASM b
 | Top-level `let` and `let rec` | yes | Factorial, Fibonacci |
 | Local `let ... in ...` | yes | Basics, Language Tour |
 | Integers, floats, booleans, strings, unit | yes | Hello, Language Tour |
+| Tuple expressions | yes | Tuples |
 | String escapes | yes | test suite |
 | Integer and float arithmetic, power, comparison, boolean, unary operators | yes | Language Tour |
 | Polymorphic functions and int/float specialization | yes | Type Inference |
@@ -21,7 +22,7 @@ This matrix tracks features currently implemented by the parser, checker, WASM b
 | `print : int|float|string -> unit` | yes | test suite |
 | `println : int|float|string -> unit` | yes | examples |
 | `to_string : 'a -> string` | yes | examples |
-| Recursive `to_string` formatting for arrays/lists/sets/maps/functions | yes | test suite |
+| Recursive `to_string` formatting for tuples/arrays/lists/sets/maps/functions | yes | test suite |
 | `Float.of_int` and `Float.to_int` | yes | test suite |
 | `String.concat/length/split` | yes | test suite |
 | Polymorphic arrays | yes | Collections, Language Tour |
@@ -37,4 +38,4 @@ This matrix tracks features currently implemented by the parser, checker, WASM b
 | Negative type diagnostics across primitives and stdlib calls | yes | test suite |
 | Exact editor-example output transcripts | yes | all examples |
 
-Not yet implemented: algebraic data type declarations, records, tuples, modules/import syntax, exceptions, pattern matching over list/array/set/map structure, garbage collection, and recoverable language-level runtime exceptions.
+Not yet implemented: algebraic data type declarations, records, modules/import syntax, exceptions, tuple projection/destructuring, pattern matching over tuple/list/array/set/map structure, garbage collection, and recoverable language-level runtime exceptions.

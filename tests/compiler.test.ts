@@ -23,6 +23,23 @@ test("parses top-level recursive function", () => {
   assert.deepEqual(ast.declarations[0].params, ["n"]);
 });
 
+test("parses tuple expressions without changing grouped expressions or unit", () => {
+  const ast = parse(`let main =
+  let grouped = (1 + 2) in
+  let pair = (grouped, "three") in
+  let nested = (pair, (true, ())) in
+  0`);
+  const main = ast.declarations[0].value;
+
+  assert.equal(main.kind, "LetIn");
+  assert.equal(main.value.kind, "Binary");
+  assert.equal(main.body.kind, "LetIn");
+  assert.equal(main.body.value.kind, "Tuple");
+  assert.equal(main.body.value.items.length, 2);
+  assert.equal(main.body.body.kind, "LetIn");
+  assert.equal(main.body.body.value.kind, "Tuple");
+});
+
 test("emits wasm text for scalar program", () => {
   const { wat } = compile(`let main = 40 + 2`);
   assert.match(wat, /export "main"/);
@@ -643,6 +660,59 @@ test("set add is persistent and leaves earlier set values unchanged", async () =
   assert.equal(result.output, "empty = {  }\none = { Ada }\ntwo = { Grace, Ada }\n");
 });
 
+test("tuples format primitives and nested tuple values", async () => {
+  const result = await runOJaml(`let main =
+  let pair = (1, "one") in
+  let nested = (pair, true, (2.5, ())) in
+  let _ = println (to_string pair) in
+  let _ = println (to_string nested) in
+  0`);
+
+  assert.equal(result.value, 0);
+  assert.equal(result.output, "(1, one)\n((1, one), true, (2.5, ()))\n");
+});
+
+test("tuples work inside arrays, lists, maps, and sets", async () => {
+  const result = await runOJaml(`let main =
+  let point = (3, 4) in
+  let points = Array.make 2 point in
+  let _ = Array.set points 1 (5, 6) in
+  let labels = List.cons ("origin", point) (List.cons ("next", Array.get points 1) (List.empty ())) in
+  let lookup = Map.set (Map.empty ()) "points" points in
+  let seen = Set.add (Set.empty ()) point in
+  let _ = println (to_string points) in
+  let _ = println (to_string labels) in
+  let _ = println (to_string lookup) in
+  let _ = println (to_string seen) in
+  Array.length points + List.length labels + Set.length seen`);
+
+  assert.equal(result.value, 5);
+  assert.equal(result.output, "[(3, 4), (5, 6)]\n[(origin, (3, 4)), (next, (5, 6))]\n{ points: [(3, 4), (5, 6)] }\n{ (3, 4) }\n");
+});
+
+test("tuple element types and arity are checked structurally", () => {
+  const cases = [
+    `let main = if true then (1, "ok") else (2, 3)`,
+    `let main = if true then (1, 2) else (1, 2, 3)`,
+    `let main =
+  let xs = Array.make 1 (1, "ok") in
+  Array.set xs 0 (1, 2)`,
+  ];
+
+  for (const source of cases) {
+    const markers = getOJamlSyntaxMarkers(source, 8);
+    assert.equal(markers.length, 1, source);
+    assert.match(markers[0].message, /Type mismatch/, source);
+  }
+});
+
+test("main cannot return tuples directly", () => {
+  const markers = getOJamlSyntaxMarkers(`let main = (1, 2)`, 8);
+
+  assert.equal(markers.length, 1);
+  assert.match(markers[0].message, /cannot return \(int, int\) directly/);
+});
+
 test("match supports int, float, string, bool, unit, wildcard, and variable patterns", async () => {
   const result = await runOJaml(`let classify n =
   match n with
@@ -671,6 +741,7 @@ const expectedExampleResults: Map<string, { mainType: string; value: number; out
   ["lists", { mainType: "int", value: 3, output: "items = [first, second, third]\nrest = [second, third]\nlength = 3\n" }],
   ["maps", { mainType: "int", value: 1906, output: "years = { Grace: 1906, Ada: 1815 }\nAda = 1815\nGrace = found\n" }],
   ["sets", { mainType: "int", value: 2, output: "names = { Grace, Ada }\nhas Ada = true\n" }],
+  ["tuples", { mainType: "int", value: 2, output: "point = (3, 4)\nlabeled = (origin, (3, 4))\npoints = [(3, 4), (0, 0)]\n" }],
   ["type-inference", { mainType: "int", value: 87, output: "square 9 = 81\nsquare 2.5 = 6.25\n" }],
   ["pattern-matching", { mainType: "unit", value: 0, output: "many\none\none point five\nother\n" }],
   ["factorial", { mainType: "int", value: 720, output: "720\n" }],
@@ -820,6 +891,21 @@ test("checker exposes instantiated set token types for hovers", () => {
   assert.equal(namesUse?.detail, "names : string set");
 });
 
+test("checker exposes tuple token and local types for hovers", () => {
+  const source = `let main =
+  let pair = (1, "one") in
+  let nested = (pair, true) in
+  println (to_string nested)`;
+  const checked = check(parse(source));
+  const symbols = new Map(checked.symbols.map((symbol) => [symbol.name, symbol]));
+  const mainLocals = new Map(symbols.get("main")?.locals?.map((symbol) => [symbol.name, symbol.detail]));
+  const tupleToken = checked.tokens.find((token) => token.name === "tuple" && token.span.start === source.indexOf("(1,"));
+
+  assert.equal(mainLocals.get("pair"), "pair : (int, string)");
+  assert.equal(mainLocals.get("nested"), "nested : ((int, string), bool)");
+  assert.equal(tupleToken?.detail, "tuple : (int, string)");
+});
+
 test("monaco hover describes typed and lexical tokens", () => {
   const source = `let main = if true then 1 + 2 else 0`;
   const main = getOJamlHoverInfo(source, source.indexOf("main"));
@@ -900,19 +986,19 @@ let main =
   ].join("\n"));
 });
 
-test("to_string recursively formats nested arrays, lists, maps, and function values", async () => {
+test("to_string recursively formats nested arrays, lists, maps, tuples, and function values", async () => {
   const result = await runOJaml(`let inc x = x + 1
 
 let main =
   let rows = Array.make 2 (List.empty ()) in
   let _ = Array.set rows 0 (List.cons 1 (List.cons 2 (List.empty ()))) in
   let _ = Array.set rows 1 (List.cons 3 (List.empty ())) in
-  let lookup = Map.set (Map.empty ()) "rows" rows in
+  let lookup = Map.set (Map.empty ()) "rows" (rows, "matrix") in
   let _ = println (to_string rows) in
   let _ = println (to_string lookup) in
   println (to_string inc)`);
 
-  assert.match(result.output, /^\[\[1, 2\], \[3\]\]\n\{ rows: \[\[1, 2\], \[3\]\] \}\nFunction \d+\n$/);
+  assert.match(result.output, /^\[\[1, 2\], \[3\]\]\n\{ rows: \(\[\[1, 2\], \[3\]\], matrix\) \}\nFunction \d+\n$/);
 });
 
 test("anonymous functions are first-class values", async () => {
