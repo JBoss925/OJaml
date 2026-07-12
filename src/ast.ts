@@ -25,6 +25,7 @@ export type Expr =
   | { kind: "Bool"; value: boolean; span: SourceSpan }
   | { kind: "Unit"; span: SourceSpan }
   | { kind: "Tuple"; items: Expr[]; span: SourceSpan }
+  | { kind: "TupleAccess"; tuple: Expr; index: number; indexSpan: SourceSpan; span: SourceSpan }
   | { kind: "Record"; fields: Array<{ name: string; nameSpan: SourceSpan; value: Expr }>; span: SourceSpan }
   | { kind: "FieldAccess"; record: Expr; field: string; fieldSpan: SourceSpan; span: SourceSpan }
   | { kind: "Var"; name: string; span: SourceSpan }

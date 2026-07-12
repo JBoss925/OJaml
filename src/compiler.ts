@@ -159,6 +159,12 @@ function emitExpr(expr: Expr, context: EmitContext): string {
       return `(i32.const 0)`;
     case "Tuple":
       return emitTuple(expr, context);
+    case "TupleAccess": {
+      const shape = context.exprType(expr.tuple);
+      if (shape.kind !== "tuple") throw new Error(`Tuple access expects a tuple shape for index ${expr.index}`);
+      if (expr.index < 0 || expr.index >= shape.items.length) throw new Error(`Tuple index ${expr.index} is out of bounds`);
+      return tupleItem(emitExpr(expr.tuple, context), expr.index);
+    }
     case "Record":
       return emitRecord(expr, context);
     case "FieldAccess": {
@@ -754,6 +760,9 @@ function collectTopLevelCallHints(program: Program, globalTypes: Map<string, Val
         visit(expr.callee, localTypes);
         expr.args.forEach((arg) => visit(arg, localTypes));
         break;
+      case "TupleAccess":
+        visit(expr.tuple, localTypes);
+        break;
       case "Record":
         expr.fields.forEach((field) => visit(field.value, localTypes));
         break;
@@ -848,6 +857,9 @@ function walkTypes(expr: Expr, types: Map<string, ValueShape>): void {
     case "Tuple":
       expr.items.forEach((item) => walkTypes(item, types));
       break;
+    case "TupleAccess":
+      walkTypes(expr.tuple, types);
+      break;
     case "Record":
       expr.fields.forEach((field) => walkTypes(field.value, types));
       break;
@@ -888,6 +900,10 @@ function inferSimpleType(expr: Expr, types: Map<string, ValueShape>): ValueShape
       return unitShape;
     case "Tuple":
       return { kind: "tuple", items: expr.items.map((item) => inferSimpleType(item, types)) };
+    case "TupleAccess": {
+      const tuple = inferSimpleType(expr.tuple, types);
+      return tuple.kind === "tuple" ? tuple.items[expr.index] ?? unknownShape : unknownShape;
+    }
     case "Record":
       return { kind: "record", fields: sortedFields(expr.fields).map((field) => ({ name: field.name, value: inferSimpleType(field.value, types) })) };
     case "FieldAccess": {
@@ -1003,6 +1019,9 @@ function walk(expr: Expr, locals: Set<string>, state: { matchId: number }): void
     case "Tuple":
       expr.items.forEach((item) => walk(item, locals, state));
       break;
+    case "TupleAccess":
+      walk(expr.tuple, locals, state);
+      break;
     case "Record":
       expr.fields.forEach((field) => walk(field.value, locals, state));
       break;
@@ -1051,6 +1070,9 @@ function freeVars(expr: Expr, bound: Set<string>): Set<string> {
       break;
     case "Tuple":
       expr.items.forEach((item) => addAll(freeVars(item, bound)));
+      break;
+    case "TupleAccess":
+      addAll(freeVars(expr.tuple, bound));
       break;
     case "Record":
       expr.fields.forEach((field) => addAll(freeVars(field.value, bound)));

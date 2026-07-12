@@ -133,16 +133,17 @@ export const ojamlExamples: OJamlExample[] = [
     id: "tuples",
     title: "Tuples",
     source: `let main =
-  let point = (3, 4) in
+  let point = (3, 4, 5) in
   let labeled = ("origin", point) in
   let sum =
     match point with
-    | (x, y) -> x + y
+    | (x, y, _) -> x + y
   in
-  let points = List.cons point (List.cons (0, 0) (List.empty ())) in
+  let points = List.cons point (List.cons (0, 0, 0) (List.empty ())) in
   let _ = println (String.concat "point = " (to_string point)) in
-  let _ = println (String.concat "x = " (to_string (fst point))) in
-  let _ = println (String.concat "y = " (to_string (snd point))) in
+  let _ = println (String.concat "x = " (to_string point.0)) in
+  let _ = println (String.concat "y = " (to_string point.1)) in
+  let _ = println (String.concat "z = " (to_string point.2)) in
   let _ = println (String.concat "x + y = " (to_string sum)) in
   let _ = println (String.concat "labeled = " (to_string labeled)) in
   let _ = println (String.concat "points = " (to_string points)) in

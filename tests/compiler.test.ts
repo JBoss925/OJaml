@@ -40,6 +40,21 @@ test("parses tuple expressions without changing grouped expressions or unit", ()
   assert.equal(main.body.body.value.kind, "Tuple");
 });
 
+test("parses zero-based tuple projection as postfix access", () => {
+  const ast = parse(`let main =
+  let triple = (1, "two", true) in
+  if triple.2 then String.length triple.1 else triple.0`);
+  const body = ast.declarations[0].value;
+
+  assert.equal(body.kind, "LetIn");
+  assert.equal(body.body.kind, "If");
+  assert.equal(body.body.condition.kind, "TupleAccess");
+  assert.equal(body.body.condition.index, 2);
+  assert.equal(body.body.thenBranch.kind, "Call");
+  assert.equal(body.body.elseBranch.kind, "TupleAccess");
+  assert.equal(body.body.elseBranch.index, 0);
+});
+
 test("parses tuple patterns without changing grouped patterns or unit patterns", () => {
   const ast = parse(`let main =
   match (1, "one") with
@@ -893,6 +908,33 @@ test("fst and snd project pair elements with precise types", async () => {
   assert.equal(result.output, "fst point = 3\nsnd point = 4\nfst label = x\nsnd nested = (2.5, two)\n");
 });
 
+test("tuple projection accesses any element with precise types", async () => {
+  const result = await runOJaml(`let main =
+  let triple = ("Ada", 1815, true) in
+  let nested = (triple, (2.5, "two"), (10, 20, 30, 40)) in
+  let _ = println (String.concat "name = " triple.0) in
+  let _ = println (String.concat "year = " (to_string triple.1)) in
+  let _ = println (String.concat "float = " (to_string nested.1.0)) in
+  let _ = println (String.concat "fourth = " (to_string nested.2.3)) in
+  if triple.2 then triple.1 + nested.2.3 else 0`);
+
+  assert.equal(result.value, 1855);
+  assert.equal(result.output, "name = Ada\nyear = 1815\nfloat = 2.5\nfourth = 40\n");
+});
+
+test("tuple projection works inside closures, records, and collection values", async () => {
+  const result = await runOJaml(`let main =
+  let record = { label = "scores"; values = (4, 5, 6) } in
+  let choose index =
+    if index = 0 then record.values.0 else record.values.2
+  in
+  let rows = List.cons record (List.empty ()) in
+  let first = List.head rows in
+  choose 1 + first.values.0 + choose 0`);
+
+  assert.equal(result.value, 14);
+});
+
 test("tuple element types and arity are checked structurally", () => {
   const cases = [
     `let main = if true then (1, "ok") else (2, 3)`,
@@ -906,6 +948,22 @@ test("tuple element types and arity are checked structurally", () => {
     const markers = getOJamlSyntaxMarkers(source, 8);
     assert.equal(markers.length, 1, source);
     assert.match(markers[0].message, /Type mismatch/, source);
+  }
+});
+
+test("tuple projection rejects non-tuples and out-of-bounds indexes", () => {
+  const cases = [
+    [`let main = (1 + 2).0`, /Tuple access expects a tuple/],
+    [`let main = (1, 2).2`, /Tuple index 2 is out of bounds/],
+    [`let main =
+  let nested = ((1, 2), "done") in
+  nested.1.0`, /Tuple access expects a tuple/],
+  ] as const;
+
+  for (const [source, pattern] of cases) {
+    const markers = getOJamlSyntaxMarkers(source, 8);
+    assert.equal(markers.length, 1, source);
+    assert.match(markers[0].message, pattern, source);
   }
 });
 
@@ -1101,7 +1159,7 @@ const expectedExampleResults: Map<string, { mainType: string; value: number; out
   ["lists", { mainType: "int", value: 3, output: "items = [first, second, third]\nfirst = first\nrest = [second, third]\nlength = 3\n" }],
   ["maps", { mainType: "int", value: 1906, output: "years = { Grace: 1906, Ada: 1815 }\nAda = 1815\nGrace = found\n" }],
   ["sets", { mainType: "int", value: 2, output: "names = { Grace, Ada }\nhas Ada = true\n" }],
-  ["tuples", { mainType: "int", value: 9, output: "point = (3, 4)\nx = 3\ny = 4\nx + y = 7\nlabeled = (origin, (3, 4))\npoints = [(3, 4), (0, 0)]\n" }],
+  ["tuples", { mainType: "int", value: 9, output: "point = (3, 4, 5)\nx = 3\ny = 4\nz = 5\nx + y = 7\nlabeled = (origin, (3, 4, 5))\npoints = [(3, 4, 5), (0, 0, 0)]\n" }],
   ["records", { mainType: "int", value: 1817, output: "ada = { active = true; name = Ada; year = 1815 }\nada.name = Ada\nlabel = Ada 1815\npeople = [{ active = true; name = Ada; year = 1815 }, { active = true; name = Grace; year = 1906 }]\n" }],
   ["type-inference", { mainType: "int", value: 87, output: "square 9 = 81\nsquare 2.5 = 6.25\n" }],
   ["local-recursion", { mainType: "int", value: 15, output: "values = [4, 5, 6]\nsum = 15\n" }],
@@ -1338,6 +1396,18 @@ test("checker exposes fst and snd instantiated tuple types for hovers", () => {
 
   assert.equal(fstSig?.detail, "fst : ('a, 'b) -> 'a");
   assert.equal(sndToken?.detail, "snd : (string, int) -> int");
+});
+
+test("checker exposes tuple projection result types for hovers", () => {
+  const source = `let main =
+  let triple = ("Ada", 1815, true) in
+  if triple.2 then triple.1 else 0`;
+  const checked = check(parse(source));
+  const boolProjection = checked.tokens.find((token) => token.name === ".2");
+  const intProjection = checked.tokens.find((token) => token.name === ".1");
+
+  assert.equal(boolProjection?.detail, ".2 : bool");
+  assert.equal(intProjection?.detail, ".1 : int");
 });
 
 test("monaco hover describes typed and lexical tokens", () => {

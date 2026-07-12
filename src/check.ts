@@ -267,6 +267,19 @@ function checkExpr(expr: Expr, globals: Map<string, Binding>, locals: Map<string
       context.tokens.push({ name: "tuple", kind: "literal", type, span: expr.span });
       return type;
     }
+    case "TupleAccess": {
+      const tuple = prune(checkExpr(expr.tuple, globals, locals, context));
+      if (tuple.kind !== "app" || tuple.name !== "tuple") {
+        throw new OJamlError(`Tuple access expects a tuple; got ${showType(tuple)}`, expr.tuple.span.start, expr.tuple.span.end);
+      }
+      if (expr.index < 0 || expr.index >= tuple.args.length) {
+        throw new OJamlError(`Tuple index ${expr.index} is out of bounds for ${showType(tuple)}`, expr.indexSpan.start, expr.indexSpan.end);
+      }
+      const type = tuple.args[expr.index];
+      context.tokens.push({ name: `.${expr.index}`, kind: "operator", type, span: { start: expr.indexSpan.start - 1, end: expr.indexSpan.end } });
+      context.tokens.push({ name: "tuple access", kind: "value", type, span: expr.span });
+      return type;
+    }
     case "Record": {
       const type = recordType(expr.fields.map((field) => ({ name: field.name, type: checkExpr(field.value, globals, locals, context) })));
       context.tokens.push({ name: "record", kind: "literal", type, span: expr.span });
@@ -280,6 +293,7 @@ function checkExpr(expr: Expr, globals: Map<string, Binding>, locals: Map<string
       const field = record.fields.find((item) => item.name === expr.field);
       if (!field) throw new OJamlError(`Record has no field '${expr.field}'`, expr.fieldSpan.start, expr.fieldSpan.end);
       context.tokens.push({ name: expr.field, kind: "value", type: field.type, span: expr.fieldSpan });
+      context.tokens.push({ name: expr.field, kind: "value", type: field.type, span: expr.span });
       return field.type;
     }
     case "Var": {
@@ -800,6 +814,9 @@ function collectLocalSymbolsInExpr(
       return undefined;
     case "Tuple":
       expr.items.forEach((item) => collectLocalSymbolsInExpr(item, globals, locals, symbols));
+      return undefined;
+    case "TupleAccess":
+      collectLocalSymbolsInExpr(expr.tuple, globals, locals, symbols);
       return undefined;
     case "Record":
       expr.fields.forEach((field) => collectLocalSymbolsInExpr(field.value, globals, locals, symbols));

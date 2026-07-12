@@ -251,14 +251,25 @@ class Parser {
   private parsePostfix(expr: Expr): Expr {
     let current = expr;
     while (this.match("dot")) {
-      const field = this.expect("ident", "Expected field name after '.'");
-      current = {
-        kind: "FieldAccess",
-        record: current,
-        field: field.text,
-        fieldSpan: { start: field.start, end: field.end },
-        span: { start: current.span.start, end: field.end },
-      };
+      if (this.at("int")) {
+        const index = this.advance();
+        current = {
+          kind: "TupleAccess",
+          tuple: current,
+          index: Number(index.text),
+          indexSpan: { start: index.start, end: index.end },
+          span: { start: current.span.start, end: index.end },
+        };
+      } else {
+        const field = this.expect("ident", "Expected field name or tuple index after '.'");
+        current = {
+          kind: "FieldAccess",
+          record: current,
+          field: field.text,
+          fieldSpan: { start: field.start, end: field.end },
+          span: { start: current.span.start, end: field.end },
+        };
+      }
     }
     return current;
   }
@@ -289,17 +300,25 @@ class Parser {
     let cursor = token.start;
     let expr: Expr = { kind: "Var", name: parts[0], span: { start: token.start, end: token.start + parts[0].length } };
     cursor += parts[0].length;
-    for (const field of parts.slice(1)) {
-      const fieldStart = cursor + 1;
-      const fieldEnd = fieldStart + field.length;
-      expr = {
-        kind: "FieldAccess",
-        record: expr,
-        field,
-        fieldSpan: { start: fieldStart, end: fieldEnd },
-        span: { start: expr.span.start, end: fieldEnd },
-      };
-      cursor = fieldEnd;
+    for (const part of parts.slice(1)) {
+      const partStart = cursor + 1;
+      const partEnd = partStart + part.length;
+      expr = /^[0-9]+$/.test(part)
+        ? {
+          kind: "TupleAccess",
+          tuple: expr,
+          index: Number(part),
+          indexSpan: { start: partStart, end: partEnd },
+          span: { start: expr.span.start, end: partEnd },
+        }
+        : {
+          kind: "FieldAccess",
+          record: expr,
+          field: part,
+          fieldSpan: { start: partStart, end: partEnd },
+          span: { start: expr.span.start, end: partEnd },
+        };
+      cursor = partEnd;
     }
     return expr;
   }

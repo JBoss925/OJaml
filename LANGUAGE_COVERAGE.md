@@ -11,7 +11,7 @@ This matrix tracks features currently implemented by the parser, checker, WASM b
 | Integers, floats, booleans, strings, unit | yes | Hello, Language Tour |
 | Tuple expressions | yes | Tuples |
 | Structural record expressions and field access | yes | Records |
-| Pair projection with `fst` and `snd` | yes | Tuples |
+| Tuple projection with `.0`, `.1`, ... plus pair helpers `fst`/`snd` | yes | Tuples |
 | String escapes | yes | test suite |
 | Integer and float arithmetic, power, comparison, boolean, unary operators | yes | Language Tour |
 | Polymorphic functions and int/float specialization | yes | Type Inference |
@@ -41,4 +41,4 @@ This matrix tracks features currently implemented by the parser, checker, WASM b
 | Negative type diagnostics across primitives and stdlib calls | yes | test suite |
 | Exact editor-example output transcripts | yes | all examples |
 
-Not yet implemented: algebraic data type declarations, nominal record type declarations, modules/import syntax, exceptions, general tuple projection beyond pairs, pattern matching over array/set/map structure, garbage collection, and recoverable language-level runtime exceptions.
+Not yet implemented: algebraic data type declarations, nominal record type declarations, modules/import syntax, exceptions, pattern matching over array/set/map structure, garbage collection, and recoverable language-level runtime exceptions.
