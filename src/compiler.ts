@@ -75,6 +75,7 @@ export function emitWat(program: Program, checkedSymbols: CheckedSymbol[] = [], 
   (import "env" "string_length" (func $host_string_length (param i32) (result i32)))
   (import "env" "string_split" (func $host_string_split (param i32 i32) (result i32)))
   (import "env" "to_string" (func $host_to_string (param i32 i32) (result i32)))
+  (import "env" "pow_f64" (func $host_pow_f64 (param f64 f64) (result f64)))
   (memory (export "memory") 1)
   (table ${Math.max(1, tableEntries.length)} funcref)
   (global $heap (mut i32) (i32.const 8192))
@@ -197,6 +198,13 @@ function emitExpr(expr: Expr, context: EmitContext): string {
         const arg = expr.args[0];
         return `(call $host_to_string ${emitExpr(arg, context)} (i32.const ${context.strings.intern(typeDescriptor(context.exprType(arg)))}))`;
       }
+      if (expr.callee.kind === "Var" && (expr.callee.name === "Set.add" || expr.callee.name === "Set.has")) {
+        const elementShape = context.exprType(expr.args[1]);
+        const helper = elementShape.kind === "float"
+          ? `${expr.callee.name}.float`
+          : expr.callee.name;
+        return `(call $${safe(helper)} ${expr.args.map((arg) => emitExpr(arg, context)).join(" ")})`;
+      }
       if (expr.callee.kind === "Var" && (context.locals.has(expr.callee.name) || context.captured.has(expr.callee.name))) {
         return emitIndirectCall(expr.callee, expr.args, context);
       }
@@ -227,6 +235,7 @@ function emitBinary(expr: Extract<Expr, { kind: "Binary" }>, context: EmitContex
       "-": "f64.sub",
       "*": "f64.mul",
       "/": "f64.div",
+      "**": "host_pow_f64",
       "=": "f64.eq",
       "<>": "f64.ne",
       "<": "f64.lt",
@@ -236,7 +245,9 @@ function emitBinary(expr: Extract<Expr, { kind: "Binary" }>, context: EmitContex
     };
     const op = floatOps[expr.op];
     if (!op) throw new Error(`Float operator '${expr.op}' is not implemented`);
-    const emitted = `(${op} ${emitF64Operand(expr.left, leftShape, context)} ${emitF64Operand(expr.right, rightShape, context)})`;
+    const emitted = op === "host_pow_f64"
+      ? `(call $host_pow_f64 ${emitF64Operand(expr.left, leftShape, context)} ${emitF64Operand(expr.right, rightShape, context)})`
+      : `(${op} ${emitF64Operand(expr.left, leftShape, context)} ${emitF64Operand(expr.right, rightShape, context)})`;
     return ["=", "<>", "<", "<=", ">", ">="].includes(expr.op) ? emitted : `(call $box_float ${emitted})`;
   }
   const left = emitExpr(expr.left, context);
@@ -246,6 +257,7 @@ function emitBinary(expr: Extract<Expr, { kind: "Binary" }>, context: EmitContex
     "-": "i32.sub",
     "*": "i32.mul",
     "/": "i32.div_s",
+    "**": "pow_i32",
     mod: "i32.rem_s",
     "=": "i32.eq",
     "<>": "i32.ne",
@@ -256,7 +268,7 @@ function emitBinary(expr: Extract<Expr, { kind: "Binary" }>, context: EmitContex
     "&&": "i32.and",
     "||": "i32.or",
   }[expr.op];
-  return `(${op} ${left} ${right})`;
+  return op === "pow_i32" ? `(call $pow_i32 ${left} ${right})` : `(${op} ${left} ${right})`;
 }
 
 function emitF64Operand(expr: Expr, shape: ValueShape, context: EmitContext): string {
@@ -396,7 +408,7 @@ function addCallScratchLocals(locals: Set<string>): void {
 
 type ValueShape =
   | { kind: "int" | "float" | "bool" | "string" | "unit" | "unknown" }
-  | { kind: "array" | "list"; elem: ValueShape }
+  | { kind: "array" | "list" | "set"; elem: ValueShape }
   | { kind: "map"; key: ValueShape; value: ValueShape }
   | { kind: "fn"; result: ValueShape };
 
@@ -463,6 +475,7 @@ function shapeFromTypeText(type: string): ValueShape {
   if (type === "unit") return unitShape;
   if (type.endsWith(" array")) return { kind: "array", elem: shapeFromTypeText(type.slice(0, -" array".length).trim()) };
   if (type.endsWith(" list")) return { kind: "list", elem: shapeFromTypeText(type.slice(0, -" list".length).trim()) };
+  if (type.endsWith(" set")) return { kind: "set", elem: shapeFromTypeText(type.slice(0, -" set".length).trim()) };
   const mapMatch = /^\((.*), (.*)\) map$/.exec(type);
   if (mapMatch) return { kind: "map", key: shapeFromTypeText(mapMatch[1]), value: shapeFromTypeText(mapMatch[2]) };
   return unknownShape;
@@ -474,6 +487,8 @@ function typeDescriptor(shape: ValueShape): string {
       return `array(${typeDescriptor(shape.elem)})`;
     case "list":
       return `list(${typeDescriptor(shape.elem)})`;
+    case "set":
+      return `set(${typeDescriptor(shape.elem)})`;
     case "map":
       return `map(${typeDescriptor(shape.key)},${typeDescriptor(shape.value)})`;
     case "fn":
@@ -727,6 +742,9 @@ function inferCallShape(expr: Extract<Expr, { kind: "Call" }>, types: Map<string
   if (name === "List.length" || name === "List.is_empty") return intShape;
   if (name === "List.iter") return unitShape;
   if (name === "List.fold_left") return inferSimpleType(expr.args[1], types);
+  if (name === "Set.empty") return { kind: "set", elem: unknownShape };
+  if (name === "Set.add") return { kind: "set", elem: inferSimpleType(expr.args[1], types) };
+  if (name === "Set.has" || name === "Set.length") return intShape;
   if (name === "Map.empty") return { kind: "map", key: unknownShape, value: unknownShape };
   if (name === "Map.set") return { kind: "map", key: inferSimpleType(expr.args[1], types), value: inferSimpleType(expr.args[2], types) };
   if (name === "Map.get") {
@@ -857,6 +875,10 @@ function builtinArities(): Array<[string, number]> {
     ["List.map", 2],
     ["List.iter", 2],
     ["List.fold_left", 3],
+    ["Set.empty", 1],
+    ["Set.add", 2],
+    ["Set.has", 2],
+    ["Set.length", 1],
     ["Map.empty", 1],
     ["Map.set", 3],
     ["Map.get", 2],
@@ -877,6 +899,7 @@ function builtinReturnShape(name: string): ValueShape {
   if (name === "List.empty" || name === "List.cons" || name === "List.tail") return { kind: "list", elem: unknownShape };
   if (name === "List.map") return { kind: "list", elem: unknownShape };
   if (name === "List.iter") return unitShape;
+  if (name === "Set.empty" || name === "Set.add") return { kind: "set", elem: unknownShape };
   if (name === "Map.empty" || name === "Map.set") return { kind: "map", key: unknownShape, value: unknownShape };
   return intShape;
 }
@@ -906,6 +929,13 @@ function emitStdlibWat(): string {
 
 (func $Float_to_int (param $value i32) (result i32)
   (i32.trunc_f64_s (call $unbox_float (local.get $value)))
+)
+
+(func $pow_i32 (param $base i32) (param $exponent i32) (result i32)
+  (i32.trunc_f64_s
+    (call $host_pow_f64
+      (f64.convert_i32_s (local.get $base))
+      (f64.convert_i32_s (local.get $exponent))))
 )
 
 (func $String_concat (param $left i32) (param $right i32) (result i32)
@@ -1104,6 +1134,84 @@ function emitStdlibWat(): string {
     )
   )
   (local.get $acc)
+)
+
+(func $Set_empty (param $unit i32) (result i32)
+  (i32.const 0)
+)
+
+(func $Set_has (param $set i32) (param $value i32) (result i32)
+  (local $cursor i32)
+  (local.set $cursor (local.get $set))
+  (loop $loop
+    (if (i32.ne (local.get $cursor) (i32.const 0))
+      (then
+        (if (i32.eq (i32.load (local.get $cursor)) (local.get $value))
+          (then (return (i32.const 1)))
+        )
+        (local.set $cursor (i32.load (i32.add (local.get $cursor) (i32.const 4))))
+        (br $loop)
+      )
+    )
+  )
+  (i32.const 0)
+)
+
+(func $Set_has_float (param $set i32) (param $value i32) (result i32)
+  (local $cursor i32)
+  (local.set $cursor (local.get $set))
+  (loop $loop
+    (if (i32.ne (local.get $cursor) (i32.const 0))
+      (then
+        (if (f64.eq
+          (call $unbox_float (i32.load (local.get $cursor)))
+          (call $unbox_float (local.get $value)))
+          (then (return (i32.const 1)))
+        )
+        (local.set $cursor (i32.load (i32.add (local.get $cursor) (i32.const 4))))
+        (br $loop)
+      )
+    )
+  )
+  (i32.const 0)
+)
+
+(func $Set_add (param $set i32) (param $value i32) (result i32)
+  (local $ptr i32)
+  (if (call $Set_has (local.get $set) (local.get $value))
+    (then (return (local.get $set)))
+  )
+  (local.set $ptr (call $alloc (i32.const 8)))
+  (i32.store (local.get $ptr) (local.get $value))
+  (i32.store (i32.add (local.get $ptr) (i32.const 4)) (local.get $set))
+  (local.get $ptr)
+)
+
+(func $Set_add_float (param $set i32) (param $value i32) (result i32)
+  (local $ptr i32)
+  (if (call $Set_has_float (local.get $set) (local.get $value))
+    (then (return (local.get $set)))
+  )
+  (local.set $ptr (call $alloc (i32.const 8)))
+  (i32.store (local.get $ptr) (local.get $value))
+  (i32.store (i32.add (local.get $ptr) (i32.const 4)) (local.get $set))
+  (local.get $ptr)
+)
+
+(func $Set_length (param $set i32) (result i32)
+  (local $count i32)
+  (local $cursor i32)
+  (local.set $cursor (local.get $set))
+  (loop $loop
+    (if (i32.ne (local.get $cursor) (i32.const 0))
+      (then
+        (local.set $count (i32.add (local.get $count) (i32.const 1)))
+        (local.set $cursor (i32.load (i32.add (local.get $cursor) (i32.const 4))))
+        (br $loop)
+      )
+    )
+  )
+  (local.get $count)
 )
 
 (func $Map_empty (param $unit i32) (result i32)

@@ -23,7 +23,7 @@ let rec fact n =
   | _ -> n * fact (n - 1)
 
 let main =
-  println "Hello, OJaml!";
+  let _ = println "Hello, OJaml!" in
   fact 6
 ```
 
@@ -33,15 +33,15 @@ Supported language features:
 - Local `let ... in ...`
 - Anonymous functions and first-class function values
 - Integers, floats, booleans, strings, and unit
-- Integer and float arithmetic, comparison, equality, boolean, and integer `mod` operators
+- Integer and float arithmetic, right-associative power `**`, comparison, equality, boolean, and integer `mod` operators
 - Numeric-polymorphic helpers displayed as `number -> number` and emitted with concrete int/float call-site specializations
 - `if ... then ... else`
 - OCaml-style `match ... with | pat -> expr`
 - Wildcard, int, float, string, bool, unit, and variable patterns
-- Polymorphic arrays, lists, maps, and higher-order collection functions
+- Polymorphic arrays, lists, sets, maps, and higher-order collection functions
 - `print : int|float|string -> unit`
 - `println : int|float|string -> unit`
-- `to_string : 'a -> string`
+- `to_string : 'a -> string`, including recursive formatting for arrays, lists, sets, maps, and functions
 
 ## Standard Library Surface
 
@@ -53,6 +53,7 @@ Supported language features:
 - `String.concat`, `String.length`, `String.split`
 - `List.empty`, `List.cons`, `List.head`, `List.tail`, `List.is_empty`, `List.length`
 - `List.map`, `List.iter`, `List.fold_left`
+- `Set.empty`, `Set.add`, `Set.has`, `Set.length`
 - `Map.empty`, `Map.set`, `Map.get`, `Map.has`
 
 All standard-library functions have explicit type schemes so editor hovers, type errors, and autocomplete remain statically meaningful.
@@ -126,7 +127,7 @@ examples/             CLI-friendly source examples
 
 ## Runtime Model
 
-The WebAssembly backend uses a uniform `i32` representation. Integers and booleans are immediate values; heap-backed values such as floats, strings, arrays, lists, maps, and closures are represented as pointers. Numeric-polymorphic top-level functions receive concrete int/float specializations when call sites require different runtime representations. The checker is responsible for rejecting invalid programs before emission.
+The WebAssembly backend uses a uniform `i32` representation. Integers and booleans are immediate values; heap-backed values such as floats, strings, arrays, lists, sets, maps, and closures are represented as pointers. Float arithmetic and power unbox operands to `f64`; `int ** int` returns an int, while any float operand makes `**` return a boxed float. Numeric-polymorphic top-level functions receive concrete int/float specializations when call sites require different runtime representations. The checker is responsible for rejecting invalid programs before emission.
 
 ## Troubleshooting
 

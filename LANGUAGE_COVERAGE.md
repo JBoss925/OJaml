@@ -9,7 +9,7 @@ This matrix tracks features currently implemented by the parser, checker, WASM b
 | Local `let ... in ...` | yes | Basics, Language Tour |
 | Integers, floats, booleans, strings, unit | yes | Hello, Language Tour |
 | String escapes | yes | test suite |
-| Integer and float arithmetic, comparison, boolean, unary operators | yes | Language Tour |
+| Integer and float arithmetic, power, comparison, boolean, unary operators | yes | Language Tour |
 | Numeric-polymorphic functions and int/float specialization | yes | Type Inference |
 | Function application | yes | all nontrivial examples |
 | First-class functions | yes | Higher Order |
@@ -21,13 +21,15 @@ This matrix tracks features currently implemented by the parser, checker, WASM b
 | `print : int|float|string -> unit` | yes | test suite |
 | `println : int|float|string -> unit` | yes | examples |
 | `to_string : 'a -> string` | yes | examples |
-| Recursive `to_string` formatting for arrays/lists/maps/functions | yes | test suite |
+| Recursive `to_string` formatting for arrays/lists/sets/maps/functions | yes | test suite |
 | `Float.of_int` and `Float.to_int` | yes | test suite |
 | `String.concat/length/split` | yes | test suite |
 | Polymorphic arrays | yes | Collections, Language Tour |
 | `Array.make/get/set/length/map/iter/fold_left` | yes | Language Tour |
 | Polymorphic lists | yes | Collections, Higher Order |
 | `List.empty/cons/head/tail/is_empty/length/map/iter/fold_left` | yes | Higher Order |
+| Polymorphic sets | yes | Sets |
+| `Set.empty/add/has/length` | yes | Sets |
 | Polymorphic maps | yes | Collections, Language Tour |
 | `Map.empty/set/get/has` | yes | Collections |
 | Monaco parser/type diagnostics | yes | editor |

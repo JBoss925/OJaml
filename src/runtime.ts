@@ -88,6 +88,9 @@ export async function runOJaml(source: string, options: RunOptions = {}): Promis
       to_string(value: number, descriptor: number) {
         return allocHostString(formatValue(memoryOrThrow(memory), value, readString(descriptor)));
       },
+      pow_f64(base: number, exponent: number) {
+        return Math.pow(base, exponent);
+      },
     },
   });
   const exports = instantiated instanceof WebAssembly.Instance ? instantiated.exports : instantiated.instance.exports;
@@ -144,6 +147,17 @@ function formatValue(memory: WebAssembly.Memory, value: number, descriptor: stri
       cursor = view.getInt32(cursor + 4, true);
     }
     return `[${items.join(", ")}]`;
+  }
+  if (descriptor.startsWith("set(") && descriptor.endsWith(")")) {
+    const elementDescriptor = descriptor.slice("set(".length, -1);
+    const view = new DataView(memory.buffer);
+    const items: string[] = [];
+    let cursor = value;
+    while (cursor !== 0) {
+      items.push(formatValue(memory, view.getInt32(cursor, true), elementDescriptor));
+      cursor = view.getInt32(cursor + 4, true);
+    }
+    return `{ ${items.join(", ")} }`;
   }
   if (descriptor.startsWith("map(") && descriptor.endsWith(")")) {
     const [keyDescriptor, valueDescriptor] = splitMapDescriptor(descriptor.slice("map(".length, -1));

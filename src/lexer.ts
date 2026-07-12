@@ -23,7 +23,7 @@ export type Token = {
 };
 
 const keywords = new Set(["let", "rec", "in", "if", "then", "else", "true", "false", "fun", "match", "with", "mod"]);
-const symbolicOperators = new Set(["+", "-", "*", "/", "<", ">", "<=", ">=", "<>", "&&", "||"]);
+const symbolicOperators = new Set(["+", "-", "*", "/", "**", "<", ">", "<=", ">=", "<>", "&&", "||"]);
 
 export function lex(source: string): Token[] {
   const tokens: Token[] = [];

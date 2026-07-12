@@ -61,13 +61,73 @@ test("runs every arithmetic, comparison, boolean, and unary operator", async () 
 
 test("numeric operators cover int, float, and mixed operand combinations", async () => {
   const result = await runOJaml(`let main =
-  let int_ops = (8 + 2) + (8 - 2) + (8 * 2) + (8 / 2) + (8 mod 3) in
-  let float_float = (8.0 + 2.0) + (8.0 - 2.0) + (8.0 * 2.0) + (8.0 / 2.0) in
-  let int_float = (8 + 2.0) + (8 - 2.0) + (8 * 2.0) + (8 / 2.0) in
-  let float_int = (8.0 + 2) + (8.0 - 2) + (8.0 * 2) + (8.0 / 2) in
+  let int_ops = (8 + 2) + (8 - 2) + (8 * 2) + (8 / 2) + (8 mod 3) + (2 ** 3) in
+  let float_float = (8.0 + 2.0) + (8.0 - 2.0) + (8.0 * 2.0) + (8.0 / 2.0) + (2.0 ** 3.0) in
+  let int_float = (8 + 2.0) + (8 - 2.0) + (8 * 2.0) + (8 / 2.0) + (2 ** 3.0) in
+  let float_int = (8.0 + 2) + (8.0 - 2) + (8.0 * 2) + (8.0 / 2) + (2.0 ** 3) in
   int_ops + Float.to_int float_float + Float.to_int int_float + Float.to_int float_int`);
 
-  assert.equal(result.value, 146);
+  assert.equal(result.value, 178);
+});
+
+test("power operator supports int, float, mixed operands, precedence, and right associativity", async () => {
+  const result = await runOJaml(`let main =
+  let int_power = 2 ** 3 in
+  let right_assoc = 2 ** 3 ** 2 in
+  let precedence = 2 + 3 ** 2 * 4 in
+  let float_base = 2.5 ** 2 in
+  let float_exponent = 9 ** 0.5 in
+  let mixed = 4.0 ** 3 in
+  let negative_int_exponent = 2 ** -1 in
+  let _ = println (String.concat "float_base = " (to_string float_base)) in
+  let _ = println (String.concat "float_exponent = " (to_string float_exponent)) in
+  let _ = println (String.concat "mixed = " (to_string mixed)) in
+  int_power + right_assoc + precedence + Float.to_int float_base + Float.to_int float_exponent + Float.to_int mixed + negative_int_exponent`);
+
+  assert.equal(result.value, 631);
+  assert.equal(result.output, "float_base = 6.25\nfloat_exponent = 3\nmixed = 64\n");
+});
+
+test("power operator covers zero, negative bases, fractional exponents, and unary grouping", async () => {
+  const result = await runOJaml(`let main =
+  let zero_exp = 9 ** 0 in
+  let zero_base = 0 ** 3 in
+  let negative_base = (0 - 2) ** 3 in
+  let unary_precedence = -2 ** 2 in
+  let grouped_unary = (-2) ** 2 in
+  let fractional = 27.0 ** (1.0 / 3.0) in
+  let _ = println (String.concat "fractional = " (to_string fractional)) in
+  zero_exp + zero_base + negative_base + unary_precedence + grouped_unary + Float.to_int fractional`);
+
+  assert.equal(result.value, -4);
+  assert.equal(result.output, "fractional = 3\n");
+});
+
+test("negative float base with fractional exponent produces NaN", async () => {
+  const result = await runOJaml(`let main =
+  let value = (0.0 - 4.0) ** 0.5 in
+  let _ = println (to_string value) in
+  value`);
+
+  assert.equal(result.mainType, "float");
+  assert.ok(Number.isNaN(result.value));
+  assert.equal(result.output, "NaN\n");
+});
+
+test("power operator works inside numeric-polymorphic functions", async () => {
+  const result = await runOJaml(`let square x = x ** 2
+let raise base exponent = base ** exponent
+
+let main =
+  let int_square = square 4 in
+  let float_square = square 2.5 in
+  let root = raise 16 0.5 in
+  let _ = println (String.concat "float_square = " (to_string float_square)) in
+  let _ = println (String.concat "root = " (to_string root)) in
+  int_square + Float.to_int float_square + Float.to_int root`);
+
+  assert.equal(result.value, 26);
+  assert.equal(result.output, "float_square = 6.25\nroot = 4\n");
 });
 
 test("numeric comparisons cover int, float, mixed equality, and mixed ordering", async () => {
@@ -342,6 +402,89 @@ test("maps use latest value for duplicate keys and support float values", async 
   assert.equal(result.value, 3);
 });
 
+test("polymorphic sets store strings and expose membership", async () => {
+  const result = await runOJaml(`let main =
+  let names = Set.empty () in
+  let names = Set.add names "Ada" in
+  let names = Set.add names "Grace" in
+  let _ = println (String.concat "names = " (to_string names)) in
+  if Set.has names "Ada" && Set.has names "Grace" && (Set.has names "Katherine" = false)
+  then Set.length names
+  else 0`);
+
+  assert.equal(result.value, 2);
+  assert.equal(result.output, "names = { Grace, Ada }\n");
+});
+
+test("sets ignore duplicate values and keep the latest unique insertion first", async () => {
+  const result = await runOJaml(`let main =
+  let values = Set.empty () in
+  let values = Set.add values 1 in
+  let values = Set.add values 2 in
+  let values = Set.add values 1 in
+  let _ = println (to_string values) in
+  if Set.has values 1 && Set.has values 2 then Set.length values else 0`);
+
+  assert.equal(result.value, 2);
+  assert.equal(result.output, "{ 2, 1 }\n");
+});
+
+test("sets support float values", async () => {
+  const result = await runOJaml(`let main =
+  let values = Set.empty () in
+  let values = Set.add values 1.5 in
+  let values = Set.add values 2.5 in
+  if Set.has values 1.5 && (Set.has values 3.5 = false)
+  then Float.to_int (Float.of_int (Set.length values) + 0.5)
+  else 0`);
+
+  assert.equal(result.value, 2);
+});
+
+test("sets cover empty, bool, unit, nested values, and to_string formatting", async () => {
+  const result = await runOJaml(`let main =
+  let empty = Set.empty () in
+  let flags = Set.add (Set.add (Set.empty ()) true) false in
+  let units = Set.add (Set.empty ()) () in
+  let first = List.cons 1 (List.empty ()) in
+  let second = List.cons 2 (List.empty ()) in
+  let nested = Set.add (Set.add (Set.empty ()) first) second in
+  let _ = println (String.concat "empty = " (to_string empty)) in
+  let _ = println (String.concat "flags = " (to_string flags)) in
+  let _ = println (String.concat "units = " (to_string units)) in
+  let _ = println (String.concat "nested = " (to_string nested)) in
+  Set.length empty + Set.length flags + Set.length units + Set.length nested`);
+
+  assert.equal(result.value, 5);
+  assert.equal(result.output, "empty = {  }\nflags = { false, true }\nunits = { () }\nnested = { [2], [1] }\n");
+});
+
+test("sets deduplicate boxed floats by numeric value", async () => {
+  const result = await runOJaml(`let main =
+  let values = Set.empty () in
+  let values = Set.add values 1.5 in
+  let values = Set.add values (3.0 / 2.0) in
+  let _ = println (to_string values) in
+  if Set.has values 1.5 then Set.length values else 0`);
+
+  assert.equal(result.value, 1);
+  assert.equal(result.output, "{ 1.5 }\n");
+});
+
+test("set add is persistent and leaves earlier set values unchanged", async () => {
+  const result = await runOJaml(`let main =
+  let empty = Set.empty () in
+  let one = Set.add empty "Ada" in
+  let two = Set.add one "Grace" in
+  let _ = println (String.concat "empty = " (to_string empty)) in
+  let _ = println (String.concat "one = " (to_string one)) in
+  let _ = println (String.concat "two = " (to_string two)) in
+  if Set.has one "Grace" then 0 else Set.length empty + Set.length one + Set.length two`);
+
+  assert.equal(result.value, 3);
+  assert.equal(result.output, "empty = {  }\none = { Ada }\ntwo = { Grace, Ada }\n");
+});
+
 test("match supports int, float, string, bool, unit, wildcard, and variable patterns", async () => {
   const result = await runOJaml(`let classify n =
   match n with
@@ -363,12 +506,13 @@ let main =
 const expectedExampleResults: Map<string, { mainType: string; value: number; output: string }> = new Map([
   ["hello", { mainType: "unit", value: 0, output: "Hello, OJaml!\n" }],
   ["bindings", { mainType: "int", value: 1815, output: "name = Ada\nyear = 1815\nactive = true\n" }],
-  ["integer-operators", { mainType: "int", value: 22, output: "10 + 4 = 14\nsum - 3 = 11\ndifference * 2 = 22\nproduct / 5 = 4\nproduct mod 5 = 2\n" }],
-  ["float-operators", { mainType: "float", value: 6, output: "7.5 + 2.5 = 10\na - 1 = 9\nb * 2.0 = 18\nc / 3 = 6\n" }],
+  ["integer-operators", { mainType: "int", value: 30, output: "10 + 4 = 14\nsum - 3 = 11\ndifference * 2 = 22\nproduct / 5 = 4\nproduct mod 5 = 2\n2 ** 3 = 8\n" }],
+  ["float-operators", { mainType: "float", value: 14, output: "7.5 + 2.5 = 10\na - 1 = 9\nb * 2.0 = 18\nc / 3 = 6\n2.0 ** 3 = 8\n" }],
   ["strings", { mainType: "int", value: 11, output: "greeting = hello world\nwords = [hello, world]\nlength = 11\n" }],
   ["arrays", { mainType: "int", value: 60, output: "scores = [10, 20, 30]\nlength = 3\n" }],
   ["lists", { mainType: "int", value: 3, output: "items = [first, second, third]\nrest = [second, third]\nlength = 3\n" }],
   ["maps", { mainType: "int", value: 1906, output: "years = { Grace: 1906, Ada: 1815 }\nAda = 1815\nGrace = found\n" }],
+  ["sets", { mainType: "int", value: 2, output: "names = { Grace, Ada }\nhas Ada = true\n" }],
   ["type-inference", { mainType: "int", value: 87, output: "square 9 = 81\nsquare 2.5 = 6.25\n" }],
   ["pattern-matching", { mainType: "unit", value: 0, output: "many\none\none point five\nother\n" }],
   ["factorial", { mainType: "int", value: 720, output: "720\n" }],
@@ -381,9 +525,9 @@ const expectedExampleResults: Map<string, { mainType: string; value: number; out
 
 test("all bundled editor examples produce their expected behavior", async () => {
   for (const example of ojamlExamples) {
-    const result = await runOJaml(example.source);
     const expected = expectedExampleResults.get(example.id);
-    assert.ok(expected, `${example.id} has an expected transcript`);
+    if (!expected) assert.fail(`${example.id} has an expected transcript`);
+    const result = await runOJaml(example.source);
     assert.equal(result.mainType, expected.mainType, `${example.id} main type`);
     assert.equal(result.output, expected.output, `${example.id} output`);
     if (result.mainType === "float") {
@@ -421,6 +565,25 @@ test("polymorphic maps reject mismatched keys and values", () => {
   assert.match(badValue[0].message, /Type mismatch/);
 });
 
+test("polymorphic sets reject mismatched element values", () => {
+  const markers = getOJamlSyntaxMarkers(`let main =
+  let values = Set.add (Set.empty ()) 1 in
+  let values = Set.add values "nope" in
+  Set.length values`, 8);
+
+  assert.equal(markers.length, 1);
+  assert.match(markers[0].message, /Type mismatch/);
+});
+
+test("set membership rejects mismatched element values", () => {
+  const markers = getOJamlSyntaxMarkers(`let main =
+  let values = Set.add (Set.empty ()) "Ada" in
+  Set.has values 1815`, 8);
+
+  assert.equal(markers.length, 1);
+  assert.match(markers[0].message, /Type mismatch/);
+});
+
 test("diagnostics cover undefined names, arity, branch mismatch, and non-exhaustive matches", () => {
   assert.match(getOJamlSyntaxMarkers(`let main = missing`, 8)[0].message, /Undefined name/);
   assert.match(getOJamlSyntaxMarkers(`let f x = x\nlet main = f 1 2`, 8)[0].message, /expects 1 argument/);
@@ -432,6 +595,8 @@ test("negative diagnostics cover invalid primitive and stdlib combinations", () 
   const cases: Array<[string, RegExp]> = [
     [`let main = 5.0 mod 2`, /Type mismatch: float vs int/],
     [`let main = true + 1`, /Operator expects int or float; got bool/],
+    [`let main = true ** 2`, /Operator expects int or float; got bool/],
+    [`let main = 2 ** "nope"`, /Operator expects int or float; got string/],
     [`let main = print (List.empty ())`, /print expects int, float, or string/],
     [`let main = "no"`, /cannot return string directly/],
     [`let main = Float.of_int 1.5`, /Type mismatch: int vs float/],
@@ -483,6 +648,20 @@ test("checker exposes instantiated stdlib token types for hovers", () => {
   assert.equal(namesUse?.detail, "names : (string, int) map");
 });
 
+test("checker exposes instantiated set token types for hovers", () => {
+  const source = `let main =
+  let names = Set.add (Set.empty ()) "Ada" in
+  Set.has names "Ada"`;
+  const checked = check(parse(source));
+  const setAdd = checked.tokens.find((token) => token.name === "Set.add");
+  const setHas = checked.tokens.find((token) => token.name === "Set.has");
+  const namesUse = checked.tokens.find((token) => token.name === "names" && token.span.start > source.indexOf("Set.has"));
+
+  assert.equal(setAdd?.detail, "Set.add : string set -> string -> string set");
+  assert.equal(setHas?.detail, "Set.has : string set -> string -> bool");
+  assert.equal(namesUse?.detail, "names : string set");
+});
+
 test("monaco hover describes typed and lexical tokens", () => {
   const source = `let main = if true then 1 + 2 else 0`;
   const main = getOJamlHoverInfo(source, source.indexOf("main"));
@@ -494,8 +673,21 @@ test("monaco hover describes typed and lexical tokens", () => {
   assert.equal(operator?.detail, "+ operator");
 });
 
+test("lexer, parser, and hover treat power as a single right-associative operator", () => {
+  const source = `let main = 2 ** 3 ** 2`;
+  const ast = parse(source);
+  const main = ast.declarations[0].value;
+  const hover = getOJamlHoverInfo(source, source.indexOf("**"));
+
+  assert.equal(main.kind, "Binary");
+  assert.equal(main.op, "**");
+  assert.equal(main.right.kind, "Binary");
+  assert.equal(main.right.op, "**");
+  assert.equal(hover?.detail, "** operator");
+});
+
 test("numeric polymorphic functions expose numeric signatures in editor metadata", () => {
-  const checked = check(parse(`let square x = x * x
+  const checked = check(parse(`let square x = x ** 2
 
 let main =
   let int_square = square 9 in
@@ -508,7 +700,7 @@ let main =
 });
 
 test("numeric polymorphic functions execute correctly at int and float call sites", async () => {
-  const result = await runOJaml(`let square x = x * x
+  const result = await runOJaml(`let square x = x ** 2
 
 let main =
   let int_square = square 9 in

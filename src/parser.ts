@@ -131,7 +131,7 @@ class Parser {
       const precedence = op ? this.precedence(op) : -1;
       if (!op || precedence < minPrecedence) break;
       this.advance();
-      const right = this.parseBinary(precedence + 1);
+      const right = this.parseBinary(precedence + (op === "**" ? 0 : 1));
       left = { kind: "Binary", op, left, right, span: { start: left.span.start, end: right.span.end } };
     }
     return left;
@@ -148,7 +148,7 @@ class Parser {
   private parseUnary(): Expr {
     if (this.at("operator", "-")) {
       const start = this.advance().start;
-      const expr = this.parseUnary();
+      const expr = this.parseBinary(this.precedence("**"));
       return { kind: "Unary", op: "-", expr, span: { start, end: expr.span.end } };
     }
     return this.parseAtom();
@@ -183,7 +183,8 @@ class Parser {
     if (op === "&&") return 2;
     if (["=", "<>", "<", "<=", ">", ">="].includes(op)) return 3;
     if (op === "+" || op === "-") return 4;
-    return 5;
+    if (op === "*" || op === "/" || op === "mod") return 5;
+    return 6;
   }
 
   private canStartAtom(): boolean {

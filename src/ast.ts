@@ -33,7 +33,7 @@ export type Expr =
   | { kind: "Fun"; params: string[]; paramSpans: SourceSpan[]; body: Expr; span: SourceSpan }
   | { kind: "Match"; expr: Expr; arms: MatchArm[]; span: SourceSpan };
 
-export type BinaryOp = "+" | "-" | "*" | "/" | "mod" | "=" | "<>" | "<" | "<=" | ">" | ">=" | "&&" | "||";
+export type BinaryOp = "+" | "-" | "*" | "/" | "**" | "mod" | "=" | "<>" | "<" | "<=" | ">" | ">=" | "&&" | "||";
 
 export type MatchArm = {
   pattern: Pattern;

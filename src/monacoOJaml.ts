@@ -47,7 +47,7 @@ export function configureOJamlMonaco(monaco: Monaco): void {
   monaco.languages.setMonarchTokensProvider(ojamlLanguageId, {
     defaultToken: "",
     keywords,
-    operators: ["+", "-", "*", "/", "=", "<>", "<", "<=", ">", ">=", "&&", "||", "->"],
+    operators: ["+", "-", "*", "/", "**", "=", "<>", "<", "<=", ">", ">=", "&&", "||", "->"],
     tokenizer: {
       root: [
         [/\(\*/, "comment", "@comment"],
@@ -56,7 +56,7 @@ export function configureOJamlMonaco(monaco: Monaco): void {
         [/[a-zA-Z_][a-zA-Z0-9_'.]*/, { cases: { "@keywords": "keyword", "@default": "identifier" } }],
         [/\d+\.\d+/, "number.float"],
         [/\d+/, "number"],
-        [/->|<>|<=|>=|&&|\|\||[+\-*/=<>]/, "operator"],
+        [/->|\*\*|<>|<=|>=|&&|\|\||[+\-*/=<>]/, "operator"],
         [/[()]/, "delimiter"],
         [/\|/, "operator"],
       ],
@@ -291,15 +291,15 @@ function registerOJamlProviders(monaco: Monaco): void {
   });
 }
 
-function getCompletionModulePrefix(model: editor.ITextModel, position: Position, wordStartColumn: number): "Array" | "List" | "Map" | undefined {
+function getCompletionModulePrefix(model: editor.ITextModel, position: Position, wordStartColumn: number): "Array" | "List" | "Set" | "Map" | undefined {
   const linePrefix = model.getValueInRange({
     startLineNumber: position.lineNumber,
     startColumn: 1,
     endLineNumber: position.lineNumber,
     endColumn: wordStartColumn,
   });
-  const match = /(?:^|[^A-Za-z0-9_'.])(Array|List|Map)\.$/.exec(linePrefix);
-  return match?.[1] as "Array" | "List" | "Map" | undefined;
+  const match = /(?:^|[^A-Za-z0-9_'.])(Array|List|Set|Map)\.$/.exec(linePrefix);
+  return match?.[1] as "Array" | "List" | "Set" | "Map" | undefined;
 }
 
 type SymbolInfo = {

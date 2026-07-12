@@ -1,13 +1,13 @@
 import type { Declaration, Expr, Pattern, Program, SourceSpan } from "./ast";
 import { OJamlError } from "./errors";
 
-export type OJamlType = "int" | "float" | "bool" | "string" | "unit" | "array" | "list" | "map" | "fn";
+export type OJamlType = "int" | "float" | "bool" | "string" | "unit" | "array" | "list" | "set" | "map" | "fn";
 export type RuntimeMainType = "int" | "float" | "bool" | "unit";
 
 type Type =
-  | { kind: "prim"; name: Exclude<OJamlType, "array" | "list" | "map" | "fn"> }
+  | { kind: "prim"; name: Exclude<OJamlType, "array" | "list" | "set" | "map" | "fn"> }
   | { kind: "var"; id: number; instance?: Type; numeric?: boolean }
-  | { kind: "app"; name: "array" | "list"; args: [Type] }
+  | { kind: "app"; name: "array" | "list" | "set"; args: [Type] }
   | { kind: "app"; name: "map"; args: [Type, Type] }
   | { kind: "fn"; params: Type[]; result: Type };
 
@@ -166,6 +166,16 @@ const stdlibSignatures: BuiltinSignature[] = [
     const b = typeVar();
     return fn([fn([b, a], b), b, app("list", [a])], b);
   }),
+  builtin("Set.empty", "Set.empty : unit -> 'a set", () => fn([unitType], app("set", [typeVar()]))),
+  builtin("Set.add", "Set.add : 'a set -> 'a -> 'a set", () => {
+    const a = typeVar();
+    return fn([app("set", [a]), a], app("set", [a]));
+  }),
+  builtin("Set.has", "Set.has : 'a set -> 'a -> bool", () => {
+    const a = typeVar();
+    return fn([app("set", [a]), a], boolType);
+  }),
+  builtin("Set.length", "Set.length : 'a set -> int", () => fn([app("set", [typeVar()])], intType)),
   builtin("Map.empty", "Map.empty : unit -> ('k, 'v) map", () => fn([unitType], app("map", [typeVar(), typeVar()]))),
   builtin("Map.set", "Map.set : ('k, 'v) map -> 'k -> 'v -> ('k, 'v) map", () => {
     const k = typeVar();
@@ -376,6 +386,16 @@ function checkBinary(expr: Extract<Expr, { kind: "Binary" }>, globals: Map<strin
     unify(rightType, intType, expr.right.span);
     return intType;
   }
+  if (expr.op === "**") {
+    const left = requireNumeric(leftType, expr.left.span);
+    const right = requireNumeric(rightType, expr.right.span);
+    if (isConcreteFloat(left) || isConcreteFloat(right)) return floatType;
+    if (isConcreteInt(left) && isConcreteInt(right)) return intType;
+    if (left.kind === "var" && isConcreteInt(right)) return left;
+    if (right.kind === "var" && isConcreteInt(left)) return right;
+    const result: Type = { kind: "var", id: nextTypeVar++, numeric: true };
+    return result;
+  }
   const result = numericResultType(leftType, rightType, expr.span);
   return ["<", "<=", ">", ">="].includes(expr.op) ? boolType : result;
 }
@@ -464,13 +484,13 @@ function sameBranches(left: Type, right: Type, span: SourceSpan): Type {
   return left;
 }
 
-function prim(name: Exclude<OJamlType, "array" | "list" | "map" | "fn">): Type {
+function prim(name: Exclude<OJamlType, "array" | "list" | "set" | "map" | "fn">): Type {
   return { kind: "prim", name };
 }
 
-function app(name: "array" | "list", args: [Type]): Type;
+function app(name: "array" | "list" | "set", args: [Type]): Type;
 function app(name: "map", args: [Type, Type]): Type;
-function app(name: "array" | "list" | "map", args: Type[]): Type {
+function app(name: "array" | "list" | "set" | "map", args: Type[]): Type {
   return name === "map"
     ? { kind: "app", name, args: args as [Type, Type] }
     : { kind: "app", name, args: args as [Type] };

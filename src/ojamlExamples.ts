@@ -32,12 +32,14 @@ export const ojamlExamples: OJamlExample[] = [
   let product = difference * 2 in
   let quotient = product / 5 in
   let remainder = product mod 5 in
+  let power = 2 ** 3 in
   let _ = println (String.concat "10 + 4 = " (to_string sum)) in
   let _ = println (String.concat "sum - 3 = " (to_string difference)) in
   let _ = println (String.concat "difference * 2 = " (to_string product)) in
   let _ = println (String.concat "product / 5 = " (to_string quotient)) in
   let _ = println (String.concat "product mod 5 = " (to_string remainder)) in
-  if quotient >= 4 && remainder = 2 then product else 0`,
+  let _ = println (String.concat "2 ** 3 = " (to_string power)) in
+  if quotient >= 4 && remainder = 2 then product + power else 0`,
   },
   {
     id: "float-operators",
@@ -47,11 +49,13 @@ export const ojamlExamples: OJamlExample[] = [
   let b = a - 1 in
   let c = b * 2.0 in
   let d = c / Float.of_int 3 in
+  let e = 2.0 ** 3 in
   let _ = println (String.concat "7.5 + 2.5 = " (to_string a)) in
   let _ = println (String.concat "a - 1 = " (to_string b)) in
   let _ = println (String.concat "b * 2.0 = " (to_string c)) in
   let _ = println (String.concat "c / 3 = " (to_string d)) in
-  if d > 5.0 && d <> 0.0 then d else 0.0`,
+  let _ = println (String.concat "2.0 ** 3 = " (to_string e)) in
+  if d > 5.0 && e <> 0.0 then d + e else 0.0`,
   },
   {
     id: "strings",
@@ -104,9 +108,21 @@ export const ojamlExamples: OJamlExample[] = [
   if Map.has years "Grace" then Map.get years "Grace" else 0`,
   },
   {
+    id: "sets",
+    title: "Sets",
+    source: `let main =
+  let names = Set.empty () in
+  let names = Set.add names "Ada" in
+  let names = Set.add names "Grace" in
+  let names = Set.add names "Ada" in
+  let _ = println (String.concat "names = " (to_string names)) in
+  let _ = if Set.has names "Ada" then println "has Ada = true" else println "has Ada = false" in
+  Set.length names`,
+  },
+  {
     id: "type-inference",
     title: "Type Inference",
-    source: `let square x = x * x
+    source: `let square x = x ** 2
 
 let main =
   let int_square = square 9 in
