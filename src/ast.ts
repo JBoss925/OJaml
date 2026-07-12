@@ -4,8 +4,23 @@ export type SourceSpan = {
 };
 
 export type Program = {
-  declarations: Declaration[];
+  declarations: TopLevelDeclaration[];
 };
+
+export type TopLevelDeclaration = Declaration | TypeDeclaration;
+
+export type TypeDeclaration = {
+  kind: "Type";
+  name: string;
+  nameSpan: SourceSpan;
+  fields: Array<{ name: string; nameSpan: SourceSpan; type: TypeExpr }>;
+  span: SourceSpan;
+};
+
+export type TypeExpr =
+  | { kind: "TName"; name: string; span: SourceSpan }
+  | { kind: "TTuple"; items: TypeExpr[]; span: SourceSpan }
+  | { kind: "TRecord"; fields: Array<{ name: string; nameSpan: SourceSpan; type: TypeExpr }>; span: SourceSpan };
 
 export type Declaration = {
   kind: "Let";
@@ -14,6 +29,7 @@ export type Declaration = {
   nameSpan: SourceSpan;
   params: string[];
   paramSpans: SourceSpan[];
+  annotation?: TypeExpr;
   value: Expr;
   span: SourceSpan;
 };
@@ -32,7 +48,7 @@ export type Expr =
   | { kind: "Unary"; op: "-"; expr: Expr; span: SourceSpan }
   | { kind: "Binary"; op: BinaryOp; left: Expr; right: Expr; span: SourceSpan }
   | { kind: "If"; condition: Expr; thenBranch: Expr; elseBranch: Expr; span: SourceSpan }
-  | { kind: "LetIn"; recursive: boolean; name: string; nameSpan: SourceSpan; value: Expr; body: Expr; span: SourceSpan }
+  | { kind: "LetIn"; recursive: boolean; name: string; nameSpan: SourceSpan; annotation?: TypeExpr; value: Expr; body: Expr; span: SourceSpan }
   | { kind: "Call"; callee: Expr; args: Expr[]; span: SourceSpan }
   | { kind: "Fun"; params: string[]; paramSpans: SourceSpan[]; body: Expr; span: SourceSpan }
   | { kind: "Match"; expr: Expr; arms: MatchArm[]; span: SourceSpan };

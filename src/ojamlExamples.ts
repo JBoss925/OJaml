@@ -158,8 +158,11 @@ export const ojamlExamples: OJamlExample[] = [
   {
     id: "records",
     title: "Records",
-    source: `let main =
-  let ada = { name = "Ada"; year = 1815; active = true } in
+    source: `type person = { name: string; year: int; active: bool }
+
+let ada : person = { name = "Ada"; year = 1815; active = true }
+
+let main =
   let grace = { name = "Grace"; year = 1906; active = true } in
   let label =
     match ada with

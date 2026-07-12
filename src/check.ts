@@ -1,4 +1,4 @@
-import type { Declaration, Expr, Pattern, Program, SourceSpan } from "./ast";
+import type { Declaration, Expr, Pattern, Program, SourceSpan, TypeDeclaration, TypeExpr } from "./ast";
 import { OJamlError } from "./errors";
 
 export type OJamlType = "int" | "float" | "bool" | "string" | "unit" | "tuple" | "record" | "array" | "list" | "set" | "map" | "fn";
@@ -59,6 +59,7 @@ type PendingToken = Omit<CheckedToken, "detail"> & {
 
 type CheckContext = {
   tokens: PendingToken[];
+  types: Map<string, Type>;
 };
 
 let nextTypeVar = 0;
@@ -72,9 +73,11 @@ const unitType = prim("unit");
 export function check(program: Program): CheckResult {
   nextTypeVar = 0;
   const globals = builtins();
-  const context: CheckContext = { tokens: [] };
+  const typeEnv = collectTypeDeclarations(program.declarations.filter((declaration): declaration is TypeDeclaration => declaration.kind === "Type"));
+  const letDeclarations = program.declarations.filter((declaration): declaration is Declaration => declaration.kind === "Let");
+  const context: CheckContext = { tokens: [], types: typeEnv };
 
-  for (const declaration of program.declarations) {
+  for (const declaration of letDeclarations) {
     if (globals.has(declaration.name)) throw new OJamlError(`Duplicate binding '${declaration.name}'`, declaration.span.start, declaration.span.end);
     globals.set(declaration.name, { type: makeDeclarationStub(declaration) });
   }
@@ -83,13 +86,38 @@ export function check(program: Program): CheckResult {
   if (!main) throw new OJamlError("Program must define 'main'", 0, 0);
   if (prune(main.type).kind === "fn") throw new OJamlError("Program 'main' must not take arguments", 0, 0);
 
-  for (const declaration of program.declarations) checkDeclaration(declaration, globals, context);
+  for (const declaration of letDeclarations) checkDeclaration(declaration, globals, context);
 
   const mainType = prune(globals.get("main")!.type);
   if (!isRuntimeMainType(mainType)) {
     throw new OJamlError(`Program 'main' cannot return ${showType(mainType)} directly; print it or return int, float, bool, or unit`, 0, 0);
   }
   return { mainType: mainType.name, symbols: collectCheckedSymbols(program, globals), tokens: finalizeTokens(context.tokens) };
+}
+
+function collectTypeDeclarations(declarations: TypeDeclaration[]): Map<string, Type> {
+  const types = new Map<string, Type>([
+    ["int", intType],
+    ["float", floatType],
+    ["bool", boolType],
+    ["string", stringType],
+    ["unit", unitType],
+  ]);
+  for (const declaration of declarations) {
+    if (types.has(declaration.name)) throw new OJamlError(`Duplicate type '${declaration.name}'`, declaration.nameSpan.start, declaration.nameSpan.end);
+    types.set(declaration.name, recordType(declaration.fields.map((field) => ({ name: field.name, type: resolveTypeExpr(field.type, types) }))));
+  }
+  return types;
+}
+
+function resolveTypeExpr(typeExpr: TypeExpr, types: Map<string, Type>): Type {
+  if (typeExpr.kind === "TName") {
+    const resolved = types.get(typeExpr.name);
+    if (!resolved) throw new OJamlError(`Unknown type '${typeExpr.name}'`, typeExpr.span.start, typeExpr.span.end);
+    return fresh(resolved);
+  }
+  if (typeExpr.kind === "TTuple") return app("tuple", typeExpr.items.map((item) => resolveTypeExpr(item, types)));
+  return recordType(typeExpr.fields.map((field) => ({ name: field.name, type: resolveTypeExpr(field.type, types) })));
 }
 
 export function getStdlibSignatures(): StdlibSignature[] {
@@ -225,6 +253,7 @@ function checkDeclaration(declaration: Declaration, globals: Map<string, Binding
     declaration.params.forEach((param, index) => locals.set(param, type.params[index]));
     expectedResult = type.result;
   }
+  if (declaration.annotation) unify(expectedResult, resolveTypeExpr(declaration.annotation, context.types), declaration.annotation.span);
   const bodyType = checkExpr(declaration.value, globals, locals, context);
   unify(expectedResult, bodyType, declaration.value.span);
   const type = prune(binding.type);
@@ -336,6 +365,7 @@ function checkExpr(expr: Expr, globals: Map<string, Binding>, locals: Map<string
         return checkExpr(expr.body, globals, nested, context);
       }
       const valueType = checkExpr(expr.value, globals, locals, context);
+      if (expr.annotation) unify(valueType, resolveTypeExpr(expr.annotation, context.types), expr.annotation.span);
       context.tokens.push({ name: expr.name, kind: "value", type: valueType, span: expr.nameSpan });
       const nested = new Map(locals);
       nested.set(expr.name, valueType);
@@ -743,6 +773,7 @@ function finalizeTokens(tokens: PendingToken[]): CheckedToken[] {
 
 function collectCheckedSymbols(program: Program, globals: Map<string, Binding>): CheckedSymbol[] {
   const symbols: CheckedSymbol[] = [];
+  const types = collectTypeDeclarations(program.declarations.filter((declaration): declaration is TypeDeclaration => declaration.kind === "Type"));
   for (const [name, binding] of builtins()) {
     symbols.push({
       name,
@@ -750,7 +781,7 @@ function collectCheckedSymbols(program: Program, globals: Map<string, Binding>):
       detail: binding.builtinDetail ?? `${name} : ${showType(binding.type)}`,
     });
   }
-  for (const declaration of program.declarations) {
+  for (const declaration of program.declarations.filter((declaration): declaration is Declaration => declaration.kind === "Let")) {
     const binding = globals.get(declaration.name);
     if (!binding) continue;
     const type = prune(binding.type);
@@ -764,13 +795,13 @@ function collectCheckedSymbols(program: Program, globals: Map<string, Binding>):
         detail: type.kind === "fn" ? `${param} : ${showType(type.params[index])}` : `${param} : unknown`,
         span: declaration.paramSpans[index],
       })),
-      locals: collectLocalSymbols(declaration, globals),
+      locals: collectLocalSymbols(declaration, globals, types),
     });
   }
   return symbols;
 }
 
-function collectLocalSymbols(declaration: Declaration, globals: Map<string, Binding>): Array<{ name: string; detail: string; span: SourceSpan }> {
+function collectLocalSymbols(declaration: Declaration, globals: Map<string, Binding>, types: Map<string, Type>): Array<{ name: string; detail: string; span: SourceSpan }> {
   const binding = globals.get(declaration.name);
   if (!binding) return [];
   const locals = new Map<string, Type>();
@@ -779,7 +810,7 @@ function collectLocalSymbols(declaration: Declaration, globals: Map<string, Bind
     declaration.params.forEach((param, index) => locals.set(param, type.params[index]));
   }
   const symbols: Array<{ name: string; detail: string; span: SourceSpan }> = [];
-  collectLocalSymbolsInExpr(declaration.value, globals, locals, symbols);
+  collectLocalSymbolsInExpr(declaration.value, globals, locals, symbols, types);
   return symbols;
 }
 
@@ -788,6 +819,7 @@ function collectLocalSymbolsInExpr(
   globals: Map<string, Binding>,
   locals: Map<string, Type>,
   symbols: Array<{ name: string; detail: string; span: SourceSpan }>,
+  types: Map<string, Type>,
 ): Type | undefined {
   switch (expr.kind) {
     case "LetIn": {
@@ -795,66 +827,66 @@ function collectLocalSymbolsInExpr(
         const valueType = typeVar();
         const nested = new Map(locals);
         nested.set(expr.name, valueType);
-        const checkedValue = checkExpr(expr.value, globals, nested, { tokens: [] });
+        const checkedValue = checkExpr(expr.value, globals, nested, { tokens: [], types });
         unify(valueType, checkedValue, expr.value.span);
         symbols.push({ name: expr.name, detail: `${expr.name} : ${showType(valueType)}`, span: expr.nameSpan });
-        collectLocalSymbolsInExpr(expr.body, globals, nested, symbols);
+        collectLocalSymbolsInExpr(expr.body, globals, nested, symbols, types);
         return undefined;
       }
-      const valueType = checkExpr(expr.value, globals, locals, { tokens: [] });
+      const valueType = checkExpr(expr.value, globals, locals, { tokens: [], types });
       symbols.push({ name: expr.name, detail: `${expr.name} : ${showType(valueType)}`, span: expr.nameSpan });
       const nested = new Map(locals);
       nested.set(expr.name, valueType);
-      collectLocalSymbolsInExpr(expr.body, globals, nested, symbols);
+      collectLocalSymbolsInExpr(expr.body, globals, nested, symbols, types);
       return undefined;
     }
     case "If":
-      collectLocalSymbolsInExpr(expr.condition, globals, locals, symbols);
-      collectLocalSymbolsInExpr(expr.thenBranch, globals, locals, symbols);
-      collectLocalSymbolsInExpr(expr.elseBranch, globals, locals, symbols);
+      collectLocalSymbolsInExpr(expr.condition, globals, locals, symbols, types);
+      collectLocalSymbolsInExpr(expr.thenBranch, globals, locals, symbols, types);
+      collectLocalSymbolsInExpr(expr.elseBranch, globals, locals, symbols, types);
       return undefined;
     case "Binary":
-      collectLocalSymbolsInExpr(expr.left, globals, locals, symbols);
-      collectLocalSymbolsInExpr(expr.right, globals, locals, symbols);
+      collectLocalSymbolsInExpr(expr.left, globals, locals, symbols, types);
+      collectLocalSymbolsInExpr(expr.right, globals, locals, symbols, types);
       return undefined;
     case "Unary":
-      collectLocalSymbolsInExpr(expr.expr, globals, locals, symbols);
+      collectLocalSymbolsInExpr(expr.expr, globals, locals, symbols, types);
       return undefined;
     case "Tuple":
-      expr.items.forEach((item) => collectLocalSymbolsInExpr(item, globals, locals, symbols));
+      expr.items.forEach((item) => collectLocalSymbolsInExpr(item, globals, locals, symbols, types));
       return undefined;
     case "TupleAccess":
-      collectLocalSymbolsInExpr(expr.tuple, globals, locals, symbols);
+      collectLocalSymbolsInExpr(expr.tuple, globals, locals, symbols, types);
       return undefined;
     case "Record":
-      expr.fields.forEach((field) => collectLocalSymbolsInExpr(field.value, globals, locals, symbols));
+      expr.fields.forEach((field) => collectLocalSymbolsInExpr(field.value, globals, locals, symbols, types));
       return undefined;
     case "FieldAccess":
-      collectLocalSymbolsInExpr(expr.record, globals, locals, symbols);
+      collectLocalSymbolsInExpr(expr.record, globals, locals, symbols, types);
       return undefined;
     case "Call":
-      collectLocalSymbolsInExpr(expr.callee, globals, locals, symbols);
-      expr.args.forEach((arg) => collectLocalSymbolsInExpr(arg, globals, locals, symbols));
+      collectLocalSymbolsInExpr(expr.callee, globals, locals, symbols, types);
+      expr.args.forEach((arg) => collectLocalSymbolsInExpr(arg, globals, locals, symbols, types));
       return undefined;
     case "Fun": {
       const nested = new Map(locals);
-      const fnType = checkExpr(expr, globals, locals, { tokens: [] });
+      const fnType = checkExpr(expr, globals, locals, { tokens: [], types });
       const pruned = prune(fnType);
       expr.params.forEach((param, index) => {
         const paramType = pruned.kind === "fn" ? pruned.params[index] : typeVar();
         nested.set(param, paramType);
         symbols.push({ name: param, detail: `${param} : ${showType(paramType)}`, span: expr.paramSpans[index] });
       });
-      collectLocalSymbolsInExpr(expr.body, globals, nested, symbols);
+      collectLocalSymbolsInExpr(expr.body, globals, nested, symbols, types);
       return undefined;
     }
     case "Match":
-      collectLocalSymbolsInExpr(expr.expr, globals, locals, symbols);
+      collectLocalSymbolsInExpr(expr.expr, globals, locals, symbols, types);
       expr.arms.forEach((arm) => {
         const nested = new Map(locals);
-        const scrutineeType = checkExpr(expr.expr, globals, locals, { tokens: [] });
+        const scrutineeType = checkExpr(expr.expr, globals, locals, { tokens: [], types });
         collectPatternSymbols(arm.pattern, scrutineeType, nested, symbols);
-        collectLocalSymbolsInExpr(arm.body, globals, nested, symbols);
+        collectLocalSymbolsInExpr(arm.body, globals, nested, symbols, types);
       });
       return undefined;
     default:

@@ -1,4 +1,4 @@
-import type { BinaryOp, Declaration, Expr, MatchArm, Pattern, Program } from "./ast";
+import type { BinaryOp, Declaration, Expr, MatchArm, Pattern, Program, TopLevelDeclaration, TypeDeclaration, TypeExpr } from "./ast";
 import { OJamlError } from "./errors";
 import { lex, type Token } from "./lexer";
 
@@ -14,13 +14,31 @@ class Parser {
   constructor(private readonly tokens: Token[]) {}
 
   parseProgram(): Program {
-    const declarations: Declaration[] = [];
+    const declarations: TopLevelDeclaration[] = [];
     while (!this.at("eof")) {
       if (this.match("semicolon2")) continue;
-      declarations.push(this.parseDeclaration());
+      declarations.push(this.at("keyword", "type") ? this.parseTypeDeclaration() : this.parseDeclaration());
       this.match("semicolon2");
     }
     return { declarations };
+  }
+
+  private parseTypeDeclaration(): TypeDeclaration {
+    const start = this.expectKeyword("type").start;
+    const nameToken = this.expect("ident", "Expected type name after type");
+    this.expect("equals", "Expected '=' in type declaration");
+    this.expect("lbrace", "Expected record type body");
+    const fields: Array<{ name: string; nameSpan: { start: number; end: number }; type: TypeExpr }> = [];
+    if (!this.at("rbrace")) {
+      do {
+        const field = this.expect("ident", "Expected record field name");
+        this.expect("colon", "Expected ':' in record type field");
+        fields.push({ name: field.text, nameSpan: { start: field.start, end: field.end }, type: this.parseTypeExpr() });
+      } while (this.match("semicolon"));
+    }
+    this.expect("rbrace", "Expected '}' in type declaration");
+    this.ensureUniqueFields(fields.map((field) => field.name), start, this.previous().end);
+    return { kind: "Type", name: nameToken.text, nameSpan: { start: nameToken.start, end: nameToken.end }, fields, span: { start, end: this.previous().end } };
   }
 
   private parseDeclaration(): Declaration {
@@ -35,6 +53,7 @@ class Parser {
       params.push(param.text);
       paramSpans.push({ start: param.start, end: param.end });
     }
+    const annotation = this.match("colon") ? this.parseTypeExpr() : undefined;
     this.expect("equals", "Expected '=' in let binding");
     const value = this.parseExpr();
     return {
@@ -44,6 +63,7 @@ class Parser {
       nameSpan: { start: nameToken.start, end: nameToken.end },
       params,
       paramSpans,
+      annotation,
       value,
       span: { start, end: value.span.end },
     };
@@ -77,6 +97,7 @@ class Parser {
       params.push(param.text);
       paramSpans.push({ start: param.start, end: param.end });
     }
+    const annotation = this.match("colon") ? this.parseTypeExpr() : undefined;
     this.expect("equals", "Expected '=' in local let");
     const parsedValue = this.parseExpr();
     const value: Expr = params.length > 0
@@ -84,7 +105,39 @@ class Parser {
       : parsedValue;
     this.expectKeyword("in");
     const body = this.parseExpr();
-    return { kind: "LetIn", recursive, name, nameSpan: { start: nameToken.start, end: nameToken.end }, value, body, span: { start, end: body.span.end } };
+    return { kind: "LetIn", recursive, name, nameSpan: { start: nameToken.start, end: nameToken.end }, annotation, value, body, span: { start, end: body.span.end } };
+  }
+
+  private parseTypeExpr(): TypeExpr {
+    const token = this.peek();
+    if (this.match("ident")) return { kind: "TName", name: token.text, span: { start: token.start, end: token.end } };
+    if (this.match("lparen")) {
+      const first = this.parseTypeExpr();
+      if (this.match("comma")) {
+        const items = [first];
+        do {
+          items.push(this.parseTypeExpr());
+        } while (this.match("comma"));
+        this.expect("rparen", "Expected ')' in tuple type");
+        return { kind: "TTuple", items, span: { start: token.start, end: this.previous().end } };
+      }
+      this.expect("rparen", "Expected ')' in type expression");
+      return first;
+    }
+    if (this.match("lbrace")) {
+      const fields: Array<{ name: string; nameSpan: { start: number; end: number }; type: TypeExpr }> = [];
+      if (!this.at("rbrace")) {
+        do {
+          const field = this.expect("ident", "Expected record field name");
+          this.expect("colon", "Expected ':' in record type field");
+          fields.push({ name: field.text, nameSpan: { start: field.start, end: field.end }, type: this.parseTypeExpr() });
+        } while (this.match("semicolon"));
+      }
+      this.expect("rbrace", "Expected '}' in record type");
+      this.ensureUniqueFields(fields.map((field) => field.name), token.start, this.previous().end);
+      return { kind: "TRecord", fields, span: { start: token.start, end: this.previous().end } };
+    }
+    throw new OJamlError("Expected type expression", token.start, token.end);
   }
 
   private parseFun(start: number): Expr {

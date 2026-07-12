@@ -14,6 +14,7 @@ export type TokenKind =
   | "lbrace"
   | "rbrace"
   | "comma"
+  | "colon"
   | "dot"
   | "semicolon"
   | "coloncolon"
@@ -30,7 +31,7 @@ export type Token = {
   end: number;
 };
 
-const keywords = new Set(["let", "rec", "in", "if", "then", "else", "true", "false", "fun", "match", "with", "mod"]);
+const keywords = new Set(["let", "rec", "in", "if", "then", "else", "true", "false", "fun", "match", "with", "mod", "type"]);
 const symbolicOperators = new Set(["+", "-", "*", "/", "**", "<", ">", "<=", ">=", "<>", "&&", "||"]);
 
 export function lex(source: string): Token[] {
@@ -108,6 +109,7 @@ export function lex(source: string): Token[] {
     else if (ch === "{") tokens.push({ kind: "lbrace", text: ch, start, end: ++i });
     else if (ch === "}") tokens.push({ kind: "rbrace", text: ch, start, end: ++i });
     else if (ch === ",") tokens.push({ kind: "comma", text: ch, start, end: ++i });
+    else if (ch === ":") tokens.push({ kind: "colon", text: ch, start, end: ++i });
     else if (ch === ".") tokens.push({ kind: "dot", text: ch, start, end: ++i });
     else if (ch === ";") tokens.push({ kind: "semicolon", text: ch, start, end: ++i });
     else if (ch === "|") tokens.push({ kind: "pipe", text: ch, start, end: ++i });

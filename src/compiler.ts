@@ -29,17 +29,18 @@ export function compile(source: string): CompileResult {
 }
 
 export function emitWat(program: Program, checkedSymbols: CheckedSymbol[] = [], checkedTokens: CheckedToken[] = []): string {
+  const declarations = letDeclarations(program);
   lambdaInfos = [];
   nextLambdaId = 0;
   nextTableIndex = 0;
   topLevelSpecializations = new Map();
-  topLevelClosureIndices = new Map(program.declarations
+  topLevelClosureIndices = new Map(declarations
     .filter((declaration) => declaration.params.length > 0)
     .map((declaration) => [declaration.name, nextTableIndex++]));
   const strings = new StringPool();
   const globals = new Map<string, number>([
     ...builtinArities(),
-    ...program.declarations.map((declaration): [string, number] => [declaration.name, declaration.params.length]),
+    ...declarations.map((declaration): [string, number] => [declaration.name, declaration.params.length]),
   ]);
   const symbolTypes = collectSymbolTypes(checkedSymbols);
   const tokenTypes = collectTokenTypes(checkedTokens);
@@ -47,13 +48,13 @@ export function emitWat(program: Program, checkedSymbols: CheckedSymbol[] = [], 
   const callHints = collectTopLevelCallHints(program, globalTypes);
   topLevelSpecializations = collectTopLevelSpecializations(program, callHints, checkedTokens);
   const topLevelWrapperNames = [
-    ...program.declarations.filter((declaration) => declaration.params.length > 0).map((declaration) => declaration.name),
+    ...declarations.filter((declaration) => declaration.params.length > 0).map((declaration) => declaration.name),
     ...[...topLevelSpecializations.values()].flatMap((variants) => [...variants.values()]),
   ];
   for (const name of topLevelWrapperNames) {
     if (!topLevelClosureIndices.has(name)) topLevelClosureIndices.set(name, nextTableIndex++);
   }
-  const declarations = program.declarations.map((declaration) => {
+  const emittedDeclarations = declarations.map((declaration) => {
     const checkedLocals = new Map(symbolTypes.locals.get(declaration.name));
     return emitDeclaration(declaration, globals, globalTypes, strings, checkedLocals, tokenTypes);
   }).join("\n\n");
@@ -83,7 +84,7 @@ ${indent(emitStdlibWat(), 2)}
 
 ${indent(emitTopLevelClosureWrappers(program), 2)}
 
-${indent([declarations, specializedDeclarations].filter(Boolean).join("\n\n"), 2)}
+${indent([emittedDeclarations, specializedDeclarations].filter(Boolean).join("\n\n"), 2)}
 ${lambdas ? `\n${indent(lambdas, 2)}\n` : ""}
 ${dataSegments ? `\n${indent(dataSegments, 2)}\n` : ""}
 ${tableEntries.length ? `\n  (elem (i32.const 0) ${tableEntries.join(" ")})\n` : ""}
@@ -465,7 +466,7 @@ function emitFunctionTypes(maxArity: number): string {
 function maxIndirectArity(program: Program, lambdas: LambdaInfo[]): number {
   const arities = [
     2,
-    ...program.declarations.filter((declaration) => declaration.params.length > 0).map((declaration) => declaration.params.length),
+    ...letDeclarations(program).filter((declaration) => declaration.params.length > 0).map((declaration) => declaration.params.length),
     ...lambdas.map((lambda) => lambda.params.length),
   ];
   return Math.max(...arities);
@@ -503,7 +504,8 @@ function emitClosure(expr: Extract<Expr, { kind: "Fun" }>, context: EmitContext,
 }
 
 function emitTopLevelClosureWrappers(program: Program): string {
-  const baseWrappers = program.declarations
+  const declarations = letDeclarations(program);
+  const baseWrappers = declarations
     .filter((declaration) => declaration.params.length > 0)
     .map((declaration) => {
       const params = declaration.params.map((param) => `(param $${safe(param)} i32)`).join(" ");
@@ -511,9 +513,9 @@ function emitTopLevelClosureWrappers(program: Program): string {
   (call $${safe(declaration.name)} ${declaration.params.map((param) => `(local.get $${safe(param)})`).join(" ")})
 )`;
     });
-  const declarations = new Map(program.declarations.map((declaration) => [declaration.name, declaration]));
+  const declarationMap = new Map(declarations.map((declaration) => [declaration.name, declaration]));
   const specializedWrappers = [...topLevelSpecializations.entries()].flatMap(([name, variants]) => {
-    const declaration = declarations.get(name);
+    const declaration = declarationMap.get(name);
     if (!declaration) return [];
     const params = declaration.params.map((param) => `(param $${safe(param)} i32)`).join(" ");
     return [...variants.values()].map((specializedName) => `(func $__closure_${safe(specializedName)} (param $__env i32) ${params} (result i32)
@@ -587,6 +589,10 @@ const boolShape: ValueShape = { kind: "bool" };
 const stringShape: ValueShape = { kind: "string" };
 const unitShape: ValueShape = { kind: "unit" };
 const unknownShape: ValueShape = { kind: "unknown" };
+
+function letDeclarations(program: Program): Declaration[] {
+  return program.declarations.filter((declaration): declaration is Declaration => declaration.kind === "Let");
+}
 
 function collectLocalTypes(declaration: Declaration, globalTypes: Map<string, ValueShape>, checkedLocals = new Map<string, ValueShape>()): Map<string, ValueShape> {
   const types = new Map<string, ValueShape>([...globalTypes, ...checkedLocals]);
@@ -729,7 +735,7 @@ function collectLocalTypesFromExpr(expr: Expr, types: Map<string, ValueShape>): 
 function collectGlobalTypes(program: Program, checkedGlobals = new Map<string, ValueShape>()): Map<string, ValueShape> {
   const types = new Map<string, ValueShape>([["print", unitShape], ...checkedGlobals]);
   for (const [name] of builtinArities()) types.set(name, builtinReturnShape(name));
-  for (const declaration of program.declarations) {
+  for (const declaration of letDeclarations(program)) {
     if (types.has(declaration.name)) continue;
     if (declaration.params.length === 0) {
       types.set(declaration.name, inferSimpleType(declaration.value, types));
@@ -741,7 +747,7 @@ function collectGlobalTypes(program: Program, checkedGlobals = new Map<string, V
 }
 
 function collectTopLevelCallHints(program: Program, globalTypes: Map<string, ValueShape>): Map<string, ValueShape[]> {
-  const declarations = new Map(program.declarations.map((declaration) => [declaration.name, declaration]));
+  const declarations = new Map(letDeclarations(program).map((declaration) => [declaration.name, declaration]));
   const hints = new Map<string, ValueShape[]>();
   const visit = (expr: Expr, localTypes: Map<string, ValueShape>) => {
     if (expr.kind === "Call" && expr.callee.kind === "Var" && declarations.has(expr.callee.name)) {
@@ -795,14 +801,14 @@ function collectTopLevelCallHints(program: Program, globalTypes: Map<string, Val
         break;
     }
   };
-  for (const declaration of program.declarations) {
+  for (const declaration of letDeclarations(program)) {
     visit(declaration.value, new Map(declaration.params.map((param): [string, ValueShape] => [param, unknownShape])));
   }
   return hints;
 }
 
 function collectTopLevelSpecializations(program: Program, hints: Map<string, ValueShape[]>, tokens: CheckedToken[] = []): Map<string, Map<string, string>> {
-  const declarations = new Map(program.declarations.map((declaration) => [declaration.name, declaration]));
+  const declarations = new Map(letDeclarations(program).map((declaration) => [declaration.name, declaration]));
   const specializations = new Map<string, Map<string, string>>();
   const addSpecialization = (name: string, shapes: ValueShape[]): void => {
     const declaration = declarations.get(name);
@@ -832,7 +838,7 @@ function emitTopLevelSpecializations(
   strings: StringPool,
   tokenTypes = new Map<string, ValueShape>(),
 ): string {
-  const declarations = new Map(program.declarations.map((declaration) => [declaration.name, declaration]));
+  const declarations = new Map(letDeclarations(program).map((declaration) => [declaration.name, declaration]));
   const emitted: string[] = [];
   for (const [name, variants] of topLevelSpecializations) {
     const declaration = declarations.get(name);
@@ -851,7 +857,7 @@ function callShapeKey(shapes: ValueShape[]): string {
 }
 
 function applyCallHintsToGlobalTypes(program: Program, globalTypes: Map<string, ValueShape>, hints: Map<string, ValueShape[]>): void {
-  for (const declaration of program.declarations) {
+  for (const declaration of letDeclarations(program)) {
     const params = hints.get(declaration.name);
     if (!params?.some((shape) => shape?.kind === "float")) continue;
     const paramTypes = new Map(declaration.params.map((param, index): [string, ValueShape] => [param, params[index] ?? unknownShape]));

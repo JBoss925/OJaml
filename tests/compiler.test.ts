@@ -7,6 +7,11 @@ import { ojamlExamples } from "../src/ojamlExamples";
 import { parse } from "../src/parser";
 import { runOJaml } from "../src/runtime";
 
+function asLet(declaration: ReturnType<typeof parse>["declarations"][number]) {
+  assert.equal(declaration.kind, "Let");
+  return declaration;
+}
+
 test("parses comments, semicolon separators, and module-style identifiers", () => {
   const ast = parse(`(* nested (* comment *) works *)
 let make = Array.make;;
@@ -18,9 +23,10 @@ let main = Array.length (make 2 0)`);
 
 test("parses top-level recursive function", () => {
   const ast = parse(`let rec fact n = if n <= 1 then 1 else n * fact (n - 1)\nlet main = fact 5`);
+  const fact = asLet(ast.declarations[0]);
   assert.equal(ast.declarations.length, 2);
-  assert.equal(ast.declarations[0].name, "fact");
-  assert.deepEqual(ast.declarations[0].params, ["n"]);
+  assert.equal(fact.name, "fact");
+  assert.deepEqual(fact.params, ["n"]);
 });
 
 test("parses tuple expressions without changing grouped expressions or unit", () => {
@@ -29,7 +35,7 @@ test("parses tuple expressions without changing grouped expressions or unit", ()
   let pair = (grouped, "three") in
   let nested = (pair, (true, ())) in
   0`);
-  const main = ast.declarations[0].value;
+  const main = asLet(ast.declarations[0]).value;
 
   assert.equal(main.kind, "LetIn");
   assert.equal(main.value.kind, "Binary");
@@ -44,7 +50,7 @@ test("parses zero-based tuple projection as postfix access", () => {
   const ast = parse(`let main =
   let triple = (1, "two", true) in
   if triple.2 then String.length triple.1 else triple.0`);
-  const body = ast.declarations[0].value;
+  const body = asLet(ast.declarations[0]).value;
 
   assert.equal(body.kind, "LetIn");
   assert.equal(body.body.kind, "If");
@@ -60,7 +66,7 @@ test("parses tuple patterns without changing grouped patterns or unit patterns",
   match (1, "one") with
   | (n, ("nested")) -> n
   | _ -> 0`);
-  const match = ast.declarations[0].value;
+  const match = asLet(ast.declarations[0]).value;
 
   assert.equal(match.kind, "Match");
   assert.equal(match.arms[0].pattern.kind, "PTuple");
@@ -73,7 +79,7 @@ test("parses record expressions, field access, and record patterns", () => {
   let person = { name = "Ada"; year = 1815 } in
   match person with
   | { year = y; name = n } -> person.year`);
-  const main = ast.declarations[0].value;
+  const main = asLet(ast.declarations[0]).value;
 
   assert.equal(main.kind, "LetIn");
   assert.equal(main.value.kind, "Record");
@@ -83,12 +89,22 @@ test("parses record expressions, field access, and record patterns", () => {
   assert.equal(main.body.arms[0].body.kind, "FieldAccess");
 });
 
+test("parses record type declarations and annotated let bindings", () => {
+  const ast = parse(`type person = { name: string; year: int }
+let ada : person = { name = "Ada"; year = 1815 }
+let main = ada.year`);
+
+  assert.equal(ast.declarations[0].kind, "Type");
+  assert.equal(ast.declarations[0].name, "person");
+  assert.equal(asLet(ast.declarations[1]).annotation?.kind, "TName");
+});
+
 test("parses empty and cons list patterns as right-associative patterns", () => {
   const ast = parse(`let main =
   match List.empty () with
   | [] -> 0
   | head :: second :: tail -> head`);
-  const match = ast.declarations[0].value;
+  const match = asLet(ast.declarations[0]).value;
 
   assert.equal(match.kind, "Match");
   assert.equal(match.arms[0].pattern.kind, "PListNil");
@@ -103,7 +119,7 @@ test("parses fixed-length array patterns", () => {
   | [| first; 2 |] -> first
   | [||] -> 0
   | _ -> -1`);
-  const match = ast.declarations[0].value;
+  const match = asLet(ast.declarations[0]).value;
 
   assert.equal(match.kind, "LetIn");
   assert.equal(match.body.kind, "Match");
@@ -910,6 +926,37 @@ test("records reject missing fields, mismatched fields, and duplicate labels", (
   }
 });
 
+test("record type declarations validate annotated bindings and locals", async () => {
+  const result = await runOJaml(`type person = { name: string; year: int }
+
+let ada : person = { year = 1815; name = "Ada" }
+
+let main =
+  let grace : person = { name = "Grace"; year = 1906 } in
+  let people = List.cons ada (List.cons grace (List.empty ())) in
+  let _ = println (String.concat ada.name (String.concat " " (to_string ada.year))) in
+  let _ = println (to_string people) in
+  ada.year + grace.year`);
+
+  assert.equal(result.value, 3721);
+  assert.equal(result.output, "Ada 1815\n[{ name = Ada; year = 1815 }, { name = Grace; year = 1906 }]\n");
+});
+
+test("record type declarations reject duplicate, unknown, and mismatched shapes", () => {
+  const cases = [
+    `type person = { name: string; name: int }\nlet main = 0`,
+    `type person = { name: missing }\nlet main = 0`,
+    `type person = { name: string; year: int }\nlet main = let ada : person = { name = "Ada" } in ada.name`,
+    `type person = { name: string; year: int }\nlet main = let ada : person = { name = "Ada"; year = "1815" } in 0`,
+    `type person = { name: string }\ntype person = { year: int }\nlet main = 0`,
+  ];
+
+  for (const source of cases) {
+    const markers = getOJamlSyntaxMarkers(source, 8);
+    assert.ok(markers.length > 0, source);
+  }
+});
+
 test("fst and snd project pair elements with precise types", async () => {
   const result = await runOJaml(`let main =
   let point = (3, 4) in
@@ -1523,7 +1570,7 @@ test("monaco hover describes typed and lexical tokens", () => {
 test("lexer, parser, and hover treat power as a single right-associative operator", () => {
   const source = `let main = 2 ** 3 ** 2`;
   const ast = parse(source);
-  const main = ast.declarations[0].value;
+  const main = asLet(ast.declarations[0]).value;
   const hover = getOJamlHoverInfo(source, source.indexOf("**"));
 
   assert.equal(main.kind, "Binary");
