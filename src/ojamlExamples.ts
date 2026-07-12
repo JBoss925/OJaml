@@ -194,16 +194,23 @@ let main =
     id: "cube-root",
     title: "Cube Root",
     source: `let rec cube_root_between n low high steps =
-  if steps = 0 then (low + high) / 2.0 else
+  if steps = 0.0 then (low + high) / 2.0 else
   let mid = (low + high) / 2.0 in
-  let cubed = mid * mid * mid in
-  if cubed > n then cube_root_between n low mid (steps - 1) else
-  cube_root_between n mid high (steps - 1)
+  let cubed = mid ** 3 in
+  if cubed > n then cube_root_between n low mid (steps - 1.0) else
+  cube_root_between n mid high (steps - 1.0)
+
+let cube_root n =
+  if n < 0.0
+  then cube_root_between n n 0.0 40.0
+  else cube_root_between n 0.0 n 40.0
 
 let main =
-  let result = cube_root_between 512.0 0.0 512.0 40 in
-  let _ = println result in
-  result`,
+  let positive = cube_root 512.0 in
+  let negative = cube_root (0.0 - 27.0) in
+  let _ = println (String.concat "cube_root 512 = " (to_string positive)) in
+  let _ = println (String.concat "cube_root -27 = " (to_string negative)) in
+  positive + negative`,
   },
   {
     id: "higher-order",

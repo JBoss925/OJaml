@@ -281,6 +281,31 @@ let main = cube_root_search 512.0 1.0`);
   assert.equal(result.value, 8);
 });
 
+test("cube root wrapper infers search bounds for positive and negative floats", async () => {
+  const result = await runOJaml(`let rec cube_root_between n low high steps =
+  if steps = 0.0 then (low + high) / 2.0 else
+  let mid = (low + high) / 2.0 in
+  let cubed = mid ** 3 in
+  if cubed > n then cube_root_between n low mid (steps - 1.0) else
+  cube_root_between n mid high (steps - 1.0)
+
+let cube_root n =
+  if n < 0.0
+  then cube_root_between n n 0.0 40.0
+  else cube_root_between n 0.0 n 40.0
+
+let main =
+  let positive = cube_root 512.0 in
+  let negative = cube_root (0.0 - 27.0) in
+  let _ = println (to_string positive) in
+  let _ = println (to_string negative) in
+  positive + negative`);
+
+  assert.equal(result.mainType, "float");
+  assert.equal(result.value, 5.000000000239652);
+  assert.equal(result.output, "8.00000000023283\n-2.999999999993179\n");
+});
+
 test("polymorphic collections store floats", async () => {
   const result = await runOJaml(`let main =
   let xs = Array.make 2 0.5 in
@@ -518,7 +543,7 @@ const expectedExampleResults: Map<string, { mainType: string; value: number; out
   ["factorial", { mainType: "int", value: 720, output: "720\n" }],
   ["fibonacci", { mainType: "int", value: 55, output: "55\n" }],
   ["gcd", { mainType: "int", value: 21, output: "21\n" }],
-  ["cube-root", { mainType: "float", value: 8.00000000023283, output: "8.00000000023283\n" }],
+  ["cube-root", { mainType: "float", value: 5.000000000239652, output: "cube_root 512 = 8.00000000023283\ncube_root -27 = -2.999999999993179\n" }],
   ["higher-order", { mainType: "int", value: 36, output: "13\n12\n11\n" }],
   ["language-tour", { mainType: "int", value: 1892, output: "OJaml tour\ntyped\n" }],
 ] as const);
