@@ -52,6 +52,23 @@ let main = Math.double 4 + Math.triple 5`);
   assert.equal(asLet(ast.declarations[1]).name, "main");
 });
 
+test("parses nested value modules as qualified namespaces", () => {
+  const ast = parse(`module Outer = struct
+  module Inner = struct
+    let value = 7
+  end
+end
+
+let main = Outer.Inner.value`);
+  const outer = asModule(ast.declarations[0]);
+  const inner = asModule(outer.declarations[0]);
+
+  assert.equal(outer.name, "Outer");
+  assert.equal(inner.name, "Outer.Inner");
+  assert.equal(inner.declarations.length, 1);
+  assert.equal(inner.declarations[0].name, "Outer.Inner.value");
+});
+
 test("parses sequence expressions without stealing record field separators", () => {
   const ast = parse(`let main =
   print "start";
@@ -980,12 +997,30 @@ let main =
   assert.equal(result.value, 19);
 });
 
-test("user-defined modules reject duplicates, unknown opens, and nested modules", () => {
+test("nested user-defined modules expose qualified and opened values", async () => {
+  const result = await runOJaml(`module Outer = struct
+  let base = 2
+  module Inner = struct
+    let scale x = x * base
+    let offset x = scale x + 5
+  end
+end
+
+open Outer.Inner
+
+let main =
+  Outer.Inner.offset 4 + scale 3`);
+
+  assert.equal(result.value, 19);
+});
+
+test("user-defined modules reject duplicates, unknown opens, and invalid nested declarations", () => {
   const cases = [
     `module Math = struct let value = 1 end\nlet Math.value = 2\nlet main = 0`,
     `module Math = struct let value = 1 let value = 2 end\nlet main = 0`,
     `module Math = struct let value = 1 end\nopen Missing\nlet main = 0`,
-    `module Outer = struct module Inner = struct let value = 1 end end\nlet main = 0`,
+    `module Outer = struct module Inner = struct let value = 1 end module Inner = struct let value = 2 end end\nlet main = 0`,
+    `module Outer = struct type thing = A end\nlet main = 0`,
   ];
 
   for (const source of cases) {
@@ -1970,7 +2005,7 @@ const expectedExampleResults: Map<string, { mainType: string; value: number; out
   ["boolean-logic", { mainType: "int", value: 3, output: "closed = false\nready = true\n" }],
   ["strings", { mainType: "int", value: 11, output: "greeting = hello world\nwords = [hello, world]\nlength = 11\n" }],
   ["open-modules", { mainType: "int", value: 10, output: "words = [hello, OJaml]\nhead = hello\nnums = [1, 2]\n" }],
-  ["user-modules", { mainType: "int", value: 75, output: "Scores.total 10 20 = 34\ntotal 5 6 = 15\noffset 7 = 25\nlocal bonus = 1\n" }],
+  ["user-modules", { mainType: "int", value: 95, output: "Scores.total 10 20 = 34\ntotal 5 6 = 15\noffset 7 = 25\nqualified 8 = 20\nlocal bonus = 1\n" }],
   ["sequencing", { mainType: "int", value: 3, output: "first\nsecond\nitems = [1, 2, 3]\n" }],
   ["pipeline", { mainType: "int", value: 12, output: "nums = [1, 2, 3]\ntotal = 12\n" }],
   ["arrays", { mainType: "int", value: 60, output: "scores = [10, 20, 30]\nlength = 3\ntotal = 60\n" }],

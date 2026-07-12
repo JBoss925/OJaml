@@ -6,7 +6,7 @@ OJaml is an OCaml-inspired language implemented in TypeScript and compiled to We
 
 - Lexer and recursive-descent parser for an OCaml-like syntax.
 - Static checks for bindings, calls, branches, pattern matches, and standard-library usage.
-- Top-level value modules with qualified access and `open` support.
+- Top-level and nested value modules with qualified access and `open` support.
 - Polymorphic type inference for functions and collection builtins.
 - First-class functions and closures with captured locals and generated indirect-call types for every arity used by the program.
 - WebAssembly text backend using a uniform `i32` value representation plus concrete int/float specializations for polymorphic functions.
@@ -32,7 +32,7 @@ let main =
 Supported language features:
 
 - `let` and `let rec` top-level bindings
-- Top-level value modules with `module Name = struct ... end`
+- Top-level and nested value modules with `module Name = struct ... end`
 - Top-level `open` declarations for built-in standard-library namespaces and user-defined value modules
 - Local `let ... in ...`, local function bindings, and local `let rec` function bindings
 - Anonymous functions and first-class function values, including high-arity function values and staged closures that return more high-arity functions
@@ -99,18 +99,24 @@ Map.has : ('k, 'v) map -> 'k -> bool
 
 All standard-library functions have explicit type schemes so editor hovers, type errors, and autocomplete remain statically meaningful.
 
-Top-level value modules group related `let` and `let rec` bindings under a qualified namespace. Module members can refer to sibling values by short name inside the module, can be called through qualified names such as `Scores.total`, and can be exposed by `open Scores`. User modules currently contain value bindings only; nested modules, module signatures, and module-local type declarations are not implemented yet.
+Value modules group related `let` and `let rec` bindings under a qualified namespace. Module members can refer to sibling values by short name inside the module, nested modules can refer to values from enclosing modules, members can be called through qualified names such as `Scores.total` or `Scores.Offsets.make`, and any user module can be exposed by `open Scores` or `open Scores.Offsets`. User modules currently contain value bindings and nested value modules only; module signatures and module-local type declarations are not implemented yet.
 
 ```ocaml
 module Scores = struct
   let bonus = 4
   let total first second = first + second + bonus
+
+  module Offsets = struct
+    let make scale =
+      fun value -> value * scale + bonus
+  end
 end
 
 open Scores
+open Scores.Offsets
 
 let main =
-  Scores.total 10 20 + total 5 6
+  Scores.total 10 20 + total 5 6 + make 3 7
 ```
 
 Top-level `open` declarations expose members of built-in or user-defined namespaces by short name:
@@ -226,7 +232,7 @@ import "ojaml/styles.css";
 
 ## Runtime Model
 
-The WebAssembly backend uses a uniform `i32` representation. Integers and booleans are immediate values; unit is zero; heap-backed values such as floats, strings, tuples, records, arrays, lists, sets, maps, and closures are represented as pointers. Tuple and record blocks store their element count followed by one `i32` slot per element or field; tuple projection and pair helpers lower to fixed slot loads after type checking, and record field labels are kept in the static type descriptor used by field access and `to_string`. Top-level value modules are erased to qualified global function/value names before WebAssembly emission; module namespaces are not runtime records. Closure values store a table index plus captured values; indirect calls generate the WebAssembly function type needed for each arity used by the program instead of imposing a fixed source-level argument ceiling. The same path handles direct calls, first-class function values, returned closures, and staged closures that accept more arguments later. Float arithmetic and power unbox operands to `f64`; `int ** int` returns an int, while any float operand makes `**` return a boxed float. Polymorphic top-level functions receive concrete int/float specializations when call sites require different runtime representations. The checker is responsible for rejecting invalid programs before emission.
+The WebAssembly backend uses a uniform `i32` representation. Integers and booleans are immediate values; unit is zero; heap-backed values such as floats, strings, tuples, records, arrays, lists, sets, maps, and closures are represented as pointers. Tuple and record blocks store their element count followed by one `i32` slot per element or field; tuple projection and pair helpers lower to fixed slot loads after type checking, and record field labels are kept in the static type descriptor used by field access and `to_string`. Value modules are erased to qualified global function/value names before WebAssembly emission; module namespaces are not runtime records. Closure values store a table index plus captured values; indirect calls generate the WebAssembly function type needed for each arity used by the program instead of imposing a fixed source-level argument ceiling. The same path handles direct calls, first-class function values, returned closures, and staged closures that accept more arguments later. Float arithmetic and power unbox operands to `f64`; `int ** int` returns an int, while any float operand makes `**` return a boxed float. Polymorphic top-level functions receive concrete int/float specializations when call sites require different runtime representations. The checker is responsible for rejecting invalid programs before emission.
 
 Runtime collection helpers trap invalid access: negative array lengths, out-of-bounds array reads/writes, empty-list head/tail, and missing `Map.get` keys do not silently read arbitrary memory. Current runtime limits are still intentional: allocation is bump-pointer based, there is no garbage collector, and traps are not yet recoverable language-level exceptions.
 

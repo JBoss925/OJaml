@@ -37,28 +37,30 @@ class Parser {
     };
   }
 
-  private parseModuleDeclaration(): ModuleDeclaration {
+  private parseModuleDeclaration(namePrefix = ""): ModuleDeclaration {
     const start = this.expectKeyword("module").start;
     const nameToken = this.expect("ident", "Expected module name after module");
     if (!/^[A-Z]/.test(nameToken.text)) {
       throw new OJamlError("Module names must start with an uppercase letter", nameToken.start, nameToken.end);
     }
+    const fullName = `${namePrefix}${nameToken.text}`;
     this.expect("equals", "Expected '=' in module declaration");
     this.expectKeyword("struct");
-    const declarations: Declaration[] = [];
+    const declarations: Array<Declaration | ModuleDeclaration> = [];
     while (!this.at("keyword", "end")) {
       if (this.at("eof")) throw new OJamlError("Expected 'end' to close module", nameToken.start, nameToken.end);
-      if (this.at("keyword", "type") || this.at("keyword", "open") || this.at("keyword", "module")) {
+      if (this.at("keyword", "type") || this.at("keyword", "open")) {
         throw new OJamlError("Only value bindings are supported inside modules", this.peek().start, this.peek().end);
       }
-      const declaration = this.parseDeclaration(`${nameToken.text}.`);
-      declarations.push(declaration);
+      declarations.push(this.at("keyword", "module")
+        ? this.parseModuleDeclaration(`${fullName}.`)
+        : this.parseDeclaration(`${fullName}.`));
       this.match("semicolon2");
     }
     const end = this.expectKeyword("end").end;
     return {
       kind: "Module",
-      name: nameToken.text,
+      name: fullName,
       nameSpan: { start: nameToken.start, end: nameToken.end },
       declarations,
       span: { start, end },

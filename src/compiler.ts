@@ -743,18 +743,33 @@ const unknownShape: ValueShape = { kind: "unknown" };
 function letDeclarations(program: Program): Declaration[] {
   return program.declarations.flatMap((declaration) => {
     if (declaration.kind === "Let") return [declaration];
-    if (declaration.kind === "Module") return declaration.declarations;
+    if (declaration.kind === "Module") return moduleLetDeclarations(declaration);
     return [];
   });
+}
+
+function moduleLetDeclarations(declaration: ModuleDeclaration): Declaration[] {
+  return declaration.declarations.flatMap((member) => member.kind === "Let" ? [member] : moduleLetDeclarations(member));
+}
+
+function moduleDeclarations(program: Program): ModuleDeclaration[] {
+  return program.declarations.flatMap((declaration) => declaration.kind === "Module" ? collectModules(declaration) : []);
+}
+
+function collectModules(declaration: ModuleDeclaration): ModuleDeclaration[] {
+  return [
+    declaration,
+    ...declaration.declarations.flatMap((member) => member.kind === "Module" ? collectModules(member) : []),
+  ];
 }
 
 function collectOpenAliases(program: Program): Map<string, string> {
   const aliases = new Map<string, string>();
   const ambiguous = new Set<string>();
   const openDeclarations = program.declarations.filter((declaration): declaration is OpenDeclaration => declaration.kind === "Open");
-  const moduleDeclarations = program.declarations.filter((declaration): declaration is ModuleDeclaration => declaration.kind === "Module");
+  const modules = moduleDeclarations(program);
   for (const declaration of openDeclarations) {
-    if (!openableModules.has(declaration.module) && !moduleDeclarations.some((moduleDeclaration) => moduleDeclaration.name === declaration.module)) continue;
+    if (!openableModules.has(declaration.module) && !modules.some((moduleDeclaration) => moduleDeclaration.name === declaration.module)) continue;
     for (const [name] of builtinArities()) {
       const prefix = `${declaration.module}.`;
       if (!name.startsWith(prefix)) continue;
@@ -762,8 +777,9 @@ function collectOpenAliases(program: Program): Map<string, string> {
       if (aliases.has(alias) && aliases.get(alias) !== name) ambiguous.add(alias);
       else if (!ambiguous.has(alias)) aliases.set(alias, name);
     }
-    const moduleDeclaration = moduleDeclarations.find((item) => item.name === declaration.module);
+    const moduleDeclaration = modules.find((item) => item.name === declaration.module);
     for (const member of moduleDeclaration?.declarations ?? []) {
+      if (member.kind !== "Let") continue;
       const alias = member.name.slice(declaration.module.length + 1);
       if (aliases.has(alias) && aliases.get(alias) !== member.name) ambiguous.add(alias);
       else if (!ambiguous.has(alias)) aliases.set(alias, member.name);
@@ -774,14 +790,16 @@ function collectOpenAliases(program: Program): Map<string, string> {
 }
 
 function moduleMemberAliases(name: string, globals: Map<string, number>): Map<string, string> {
-  const dot = name.indexOf(".");
-  if (dot < 0) return new Map();
-  const prefix = name.slice(0, dot + 1);
+  const parts = name.split(".");
+  if (parts.length < 2) return new Map();
   const aliases = new Map<string, string>();
-  for (const key of globals.keys()) {
-    if (!key.startsWith(prefix)) continue;
-    const alias = key.slice(prefix.length);
-    if (!alias.includes(".")) aliases.set(alias, key);
+  for (let i = 1; i < parts.length; i++) {
+    const prefix = `${parts.slice(0, i).join(".")}.`;
+    for (const key of globals.keys()) {
+      if (!key.startsWith(prefix)) continue;
+      const alias = key.slice(prefix.length);
+      if (!alias.includes(".")) aliases.set(alias, key);
+    }
   }
   return aliases;
 }

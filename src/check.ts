@@ -95,7 +95,7 @@ export function check(program: Program): CheckResult {
   const globals = builtins();
   const typeDeclarations = program.declarations.filter((declaration): declaration is TypeDeclaration => declaration.kind === "Type");
   const letDeclarations = collectLetDeclarations(program);
-  const moduleDeclarations = program.declarations.filter((declaration): declaration is ModuleDeclaration => declaration.kind === "Module");
+  const moduleDeclarations = collectModuleDeclarations(program);
   ensureUniqueModules(moduleDeclarations);
   const openAliases = collectOpenAliases(program.declarations.filter((declaration): declaration is OpenDeclaration => declaration.kind === "Open"), moduleDeclarations);
   const typeEnv = collectTypeDeclarations(typeDeclarations);
@@ -142,6 +142,7 @@ function collectOpenAliases(declarations: OpenDeclaration[], modules: ModuleDecl
     }
     const moduleDeclaration = modules.find((item) => item.name === declaration.module);
     for (const member of moduleDeclaration?.declarations ?? []) {
+      if (member.kind !== "Let") continue;
       const alias = member.name.slice(declaration.module.length + 1);
       if (aliases.has(alias) && aliases.get(alias) !== member.name) ambiguous.add(alias);
       else if (!ambiguous.has(alias)) aliases.set(alias, member.name);
@@ -154,15 +155,30 @@ function collectOpenAliases(declarations: OpenDeclaration[], modules: ModuleDecl
 function collectLetDeclarations(program: Program): Declaration[] {
   return program.declarations.flatMap((declaration) => {
     if (declaration.kind === "Let") return [declaration];
-    if (declaration.kind === "Module") return declaration.declarations;
+    if (declaration.kind === "Module") return collectModuleLetDeclarations(declaration);
     return [];
   });
+}
+
+function collectModuleDeclarations(program: Program): ModuleDeclaration[] {
+  return program.declarations.flatMap((declaration) => declaration.kind === "Module" ? collectModules(declaration) : []);
+}
+
+function collectModules(declaration: ModuleDeclaration): ModuleDeclaration[] {
+  return [
+    declaration,
+    ...declaration.declarations.flatMap((member) => member.kind === "Module" ? collectModules(member) : []),
+  ];
+}
+
+function collectModuleLetDeclarations(declaration: ModuleDeclaration): Declaration[] {
+  return declaration.declarations.flatMap((member) => member.kind === "Let" ? [member] : collectModuleLetDeclarations(member));
 }
 
 function ensureUniqueModules(modules: ModuleDeclaration[]): void {
   const seen = new Set<string>();
   for (const moduleDeclaration of modules) {
-    if (stdlibModules.has(moduleDeclaration.name)) {
+    if (!moduleDeclaration.name.includes(".") && stdlibModules.has(moduleDeclaration.name)) {
       throw new OJamlError(`Module '${moduleDeclaration.name}' conflicts with a built-in module`, moduleDeclaration.nameSpan.start, moduleDeclaration.nameSpan.end);
     }
     if (seen.has(moduleDeclaration.name)) {
@@ -687,14 +703,16 @@ function resolveGlobalName(name: string, globals: Map<string, Binding>, context:
 }
 
 function moduleMemberAliases(name: string, globals: Map<string, Binding>): Map<string, string> {
-  const dot = name.indexOf(".");
-  if (dot < 0) return new Map();
-  const prefix = name.slice(0, dot + 1);
+  const parts = name.split(".");
+  if (parts.length < 2) return new Map();
   const aliases = new Map<string, string>();
-  for (const key of globals.keys()) {
-    if (!key.startsWith(prefix)) continue;
-    const alias = key.slice(prefix.length);
-    if (!alias.includes(".")) aliases.set(alias, key);
+  for (let i = 1; i < parts.length; i++) {
+    const prefix = `${parts.slice(0, i).join(".")}.`;
+    for (const key of globals.keys()) {
+      if (!key.startsWith(prefix)) continue;
+      const alias = key.slice(prefix.length);
+      if (!alias.includes(".")) aliases.set(alias, key);
+    }
   }
   return aliases;
 }
