@@ -11,7 +11,7 @@ This matrix tracks features currently implemented by the parser, checker, WASM b
 | Integers, floats, booleans, strings, unit | yes | Hello, Language Tour |
 | Tuple expressions | yes | Tuples |
 | Structural record expressions and field access | yes | Records |
-| Record type declarations and value annotations | yes | Records |
+| Record type declarations plus value and function parameter annotations | yes | Records |
 | Tuple projection with `.0`, `.1`, ... plus pair helpers `fst`/`snd` | yes | Tuples |
 | String escapes | yes | test suite |
 | Integer and float arithmetic, power, comparison, boolean, unary operators | yes | Language Tour |

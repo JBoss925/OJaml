@@ -29,6 +29,7 @@ export type Declaration = {
   nameSpan: SourceSpan;
   params: string[];
   paramSpans: SourceSpan[];
+  paramAnnotations: Array<TypeExpr | undefined>;
   annotation?: TypeExpr;
   value: Expr;
   span: SourceSpan;
@@ -50,7 +51,7 @@ export type Expr =
   | { kind: "If"; condition: Expr; thenBranch: Expr; elseBranch: Expr; span: SourceSpan }
   | { kind: "LetIn"; recursive: boolean; name: string; nameSpan: SourceSpan; annotation?: TypeExpr; value: Expr; body: Expr; span: SourceSpan }
   | { kind: "Call"; callee: Expr; args: Expr[]; span: SourceSpan }
-  | { kind: "Fun"; params: string[]; paramSpans: SourceSpan[]; body: Expr; span: SourceSpan }
+  | { kind: "Fun"; params: string[]; paramSpans: SourceSpan[]; paramAnnotations: Array<TypeExpr | undefined>; body: Expr; span: SourceSpan }
   | { kind: "Match"; expr: Expr; arms: MatchArm[]; span: SourceSpan };
 
 export type BinaryOp = "+" | "-" | "*" | "/" | "**" | "mod" | "=" | "<>" | "<" | "<=" | ">" | ">=" | "&&" | "||";

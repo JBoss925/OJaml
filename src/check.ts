@@ -79,7 +79,7 @@ export function check(program: Program): CheckResult {
 
   for (const declaration of letDeclarations) {
     if (globals.has(declaration.name)) throw new OJamlError(`Duplicate binding '${declaration.name}'`, declaration.span.start, declaration.span.end);
-    globals.set(declaration.name, { type: makeDeclarationStub(declaration) });
+    globals.set(declaration.name, { type: makeDeclarationStub(declaration, typeEnv) });
   }
 
   const main = globals.get("main");
@@ -238,9 +238,11 @@ function builtin(name: string, detail: string, createType: () => Type, documenta
   return { name, detail, documentation, createType };
 }
 
-function makeDeclarationStub(declaration: Declaration): Type {
+function makeDeclarationStub(declaration: Declaration, types: Map<string, Type>): Type {
   if (declaration.params.length === 0) return typeVar();
-  return fn(declaration.params.map(() => typeVar()), typeVar());
+  return fn(declaration.params.map((_, index) => declaration.paramAnnotations[index]
+    ? resolveTypeExpr(declaration.paramAnnotations[index]!, types)
+    : typeVar()), typeVar());
 }
 
 function checkDeclaration(declaration: Declaration, globals: Map<string, Binding>, context: CheckContext): Type {
@@ -422,8 +424,10 @@ function checkExpr(expr: Expr, globals: Map<string, Binding>, locals: Map<string
     }
     case "Fun": {
       const nested = new Map(locals);
-      const params = expr.params.map((param) => {
-        const paramType = typeVar();
+      const params = expr.params.map((param, index) => {
+        const paramType = expr.paramAnnotations[index]
+          ? resolveTypeExpr(expr.paramAnnotations[index]!, context.types)
+          : typeVar();
         nested.set(param, paramType);
         return paramType;
       });

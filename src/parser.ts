@@ -48,10 +48,12 @@ class Parser {
     const name = nameToken.text;
     const params: string[] = [];
     const paramSpans = [];
-    while (this.at("ident")) {
-      const param = this.advance();
-      params.push(param.text);
-      paramSpans.push({ start: param.start, end: param.end });
+    const paramAnnotations = [];
+    while (this.canStartParam()) {
+      const param = this.parseParam();
+      params.push(param.name);
+      paramSpans.push(param.span);
+      paramAnnotations.push(param.annotation);
     }
     const annotation = this.match("colon") ? this.parseTypeExpr() : undefined;
     this.expect("equals", "Expected '=' in let binding");
@@ -63,6 +65,7 @@ class Parser {
       nameSpan: { start: nameToken.start, end: nameToken.end },
       params,
       paramSpans,
+      paramAnnotations,
       annotation,
       value,
       span: { start, end: value.span.end },
@@ -92,16 +95,18 @@ class Parser {
     const name = nameToken.text;
     const params: string[] = [];
     const paramSpans = [];
-    while (this.at("ident")) {
-      const param = this.advance();
-      params.push(param.text);
-      paramSpans.push({ start: param.start, end: param.end });
+    const paramAnnotations = [];
+    while (this.canStartParam()) {
+      const param = this.parseParam();
+      params.push(param.name);
+      paramSpans.push(param.span);
+      paramAnnotations.push(param.annotation);
     }
     const annotation = this.match("colon") ? this.parseTypeExpr() : undefined;
     this.expect("equals", "Expected '=' in local let");
     const parsedValue = this.parseExpr();
     const value: Expr = params.length > 0
-      ? { kind: "Fun", params, paramSpans, body: parsedValue, span: { start: paramSpans[0].start, end: parsedValue.span.end } }
+      ? { kind: "Fun", params, paramSpans, paramAnnotations, body: parsedValue, span: { start: paramSpans[0].start, end: parsedValue.span.end } }
       : parsedValue;
     this.expectKeyword("in");
     const body = this.parseExpr();
@@ -143,14 +148,36 @@ class Parser {
   private parseFun(start: number): Expr {
     const params: string[] = [];
     const paramSpans = [];
+    const paramAnnotations = [];
     do {
-      const param = this.expect("ident", "Expected function parameter");
-      params.push(param.text);
-      paramSpans.push({ start: param.start, end: param.end });
-    } while (this.at("ident"));
+      const param = this.parseParam();
+      params.push(param.name);
+      paramSpans.push(param.span);
+      paramAnnotations.push(param.annotation);
+    } while (this.canStartParam());
     this.expect("arrow", "Expected '->' after function parameters");
     const body = this.parseExpr();
-    return { kind: "Fun", params, paramSpans, body, span: { start, end: body.span.end } };
+    return { kind: "Fun", params, paramSpans, paramAnnotations, body, span: { start, end: body.span.end } };
+  }
+
+  private canStartParam(): boolean {
+    if (this.at("ident")) return true;
+    if (!this.at("lparen")) return false;
+    const next = this.tokens[this.index + 1];
+    const after = this.tokens[this.index + 2];
+    return next?.kind === "ident" && after?.kind === "colon";
+  }
+
+  private parseParam(): { name: string; span: { start: number; end: number }; annotation?: TypeExpr } {
+    if (this.match("lparen")) {
+      const name = this.expect("ident", "Expected parameter name");
+      this.expect("colon", "Expected ':' in parameter annotation");
+      const annotation = this.parseTypeExpr();
+      this.expect("rparen", "Expected ')' after parameter annotation");
+      return { name: name.text, span: { start: name.start, end: name.end }, annotation };
+    }
+    const param = this.expect("ident", "Expected parameter name");
+    return { name: param.text, span: { start: param.start, end: param.end } };
   }
 
   private parseMatch(start: number): Expr {

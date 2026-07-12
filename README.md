@@ -34,7 +34,7 @@ Supported language features:
 - Local `let ... in ...`, local function bindings, and local `let rec` function bindings
 - Anonymous functions and first-class function values, including high-arity function values
 - Integers, floats, booleans, strings, unit, tuples, and structural records
-- Record type declarations and value annotations such as `let ada : person = ...`
+- Record type declarations plus value and function parameter annotations such as `let ada : person = ...` and `let describe (person : person) = ...`
 - Integer and float arithmetic, right-associative power `**`, comparison, equality, boolean, and integer `mod` operators
 - Polymorphic functions, including constrained numeric variables displayed as `number -> number` and emitted with concrete int/float call-site specializations
 - `if ... then ... else`
@@ -98,7 +98,7 @@ All standard-library functions have explicit type schemes so editor hovers, type
 
 Tuple projection uses zero-based postfix indexes: `point.0`, `point.1`, and so on. The checker verifies the receiver is a tuple and rejects indexes outside the tuple arity before emission. `fst` and `snd` remain available as pair-specific helpers.
 
-Record type declarations use `type person = { name: string; year: int }`. Annotated values such as `let ada : person = { name = "Ada"; year = 1815 }` are checked against the named record shape, then lower to the same structural record layout as unannotated records. Field layout is sorted by label at compile time, so source field order does not affect access, matching, or formatting. Function parameter annotations are still future work.
+Record type declarations use `type person = { name: string; year: int }`. Annotated values such as `let ada : person = { name = "Ada"; year = 1815 }` and annotated function parameters such as `let describe (person : person) = person.name` are checked against the named record shape, then lower to the same structural record layout as unannotated records. Field layout is sorted by label at compile time, so source field order does not affect access, matching, or formatting.
 
 Pattern matching supports primitive literals, unit, wildcard/variable catch-alls, tuple structure, record structure, list structure with `[]` and `head :: tail`, and fixed-length array structure with `[| ... |]`. Tuple, record, list, and array patterns may bind nested values and mix literals with binders. Array patterns match exact lengths, while list empty/cons coverage and catch-all patterns remain the conservative route for exhaustive matches. Structural patterns for sets and maps are intentionally still future work.
 

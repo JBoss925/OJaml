@@ -162,12 +162,14 @@ export const ojamlExamples: OJamlExample[] = [
 
 let ada : person = { name = "Ada"; year = 1815; active = true }
 
+let display (person : person) =
+  String.concat person.name (String.concat " " (to_string person.year))
+
 let main =
   let grace = { name = "Grace"; year = 1906; active = true } in
   let label =
     match ada with
-    | { active = true; name = n; year = y } ->
-        String.concat n (String.concat " " (to_string y))
+    | { active = true; name = _; year = _ } -> display ada
     | _ -> "inactive"
   in
   let people = List.cons ada (List.cons grace (List.empty ())) in

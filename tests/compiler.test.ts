@@ -92,11 +92,13 @@ test("parses record expressions, field access, and record patterns", () => {
 test("parses record type declarations and annotated let bindings", () => {
   const ast = parse(`type person = { name: string; year: int }
 let ada : person = { name = "Ada"; year = 1815 }
+let describe (person : person) = person.name
 let main = ada.year`);
 
   assert.equal(ast.declarations[0].kind, "Type");
   assert.equal(ast.declarations[0].name, "person");
   assert.equal(asLet(ast.declarations[1]).annotation?.kind, "TName");
+  assert.equal(asLet(ast.declarations[2]).paramAnnotations[0]?.kind, "TName");
 });
 
 test("parses empty and cons list patterns as right-associative patterns", () => {
@@ -940,6 +942,36 @@ let main =
 
   assert.equal(result.value, 3721);
   assert.equal(result.output, "Ada 1815\n[{ name = Ada; year = 1815 }, { name = Grace; year = 1906 }]\n");
+});
+
+test("function parameter annotations constrain top-level, local, and anonymous functions", async () => {
+  const result = await runOJaml(`type person = { name: string; year: int }
+
+let describe (person : person) : string =
+  String.concat person.name (String.concat " " (to_string person.year))
+
+let main =
+  let age (person : person) = 2026 - person.year in
+  let label = fun (person : person) -> describe person in
+  let ada : person = { year = 1815; name = "Ada" } in
+  let _ = println (label ada) in
+  age ada`);
+
+  assert.equal(result.value, 211);
+  assert.equal(result.output, "Ada 1815\n");
+});
+
+test("function parameter annotations reject unknown types and bad call shapes", () => {
+  const cases = [
+    `let f (x : missing) = x\nlet main = 0`,
+    `type person = { name: string; year: int }\nlet f (person : person) = person.year\nlet main = f { name = "Ada" }`,
+    `let f (x : int) = x + 1\nlet main = f "one"`,
+  ];
+
+  for (const source of cases) {
+    const markers = getOJamlSyntaxMarkers(source, 8);
+    assert.ok(markers.length > 0, source);
+  }
 });
 
 test("record type declarations reject duplicate, unknown, and mismatched shapes", () => {

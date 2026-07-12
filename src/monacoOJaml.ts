@@ -58,7 +58,7 @@ export function configureOJamlMonaco(monaco: Monaco): void {
         [/\d+\.\d+/, "number.float"],
         [/\d+/, "number"],
         [/->|\*\*|<>|<=|>=|&&|\|\||[+\-*/=<>.]/, "operator"],
-        [/[(){};]/, "delimiter"],
+        [/[(){};:]/, "delimiter"],
         [/\|/, "operator"],
       ],
       comment: [
