@@ -368,6 +368,12 @@ function emitVariantConstructor(constructor: ConstructorInfo, payload?: Expr, co
 
 function emitBinary(expr: Extract<Expr, { kind: "Binary" }>, context: EmitContext): string {
   if (expr.op === "|>") return emitCall(expr.right, [expr.left], context);
+  if (expr.op === "&&") {
+    return `(if (result i32) ${emitExpr(expr.left, context)} (then ${emitExpr(expr.right, context)}) (else (i32.const 0)))`;
+  }
+  if (expr.op === "||") {
+    return `(if (result i32) ${emitExpr(expr.left, context)} (then (i32.const 1)) (else ${emitExpr(expr.right, context)}))`;
+  }
   const leftShape = context.exprType(expr.left);
   const rightShape = context.exprType(expr.right);
   const isFloat = leftShape.kind === "float" || rightShape.kind === "float";

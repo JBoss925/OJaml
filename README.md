@@ -39,7 +39,7 @@ Supported language features:
 - Anonymous functions and first-class function values, including high-arity function values and staged closures that return more high-arity functions
 - Integers, floats, booleans, strings, unit, tuples, structural records, and algebraic data types
 - Record and algebraic data type declarations, including type parameters, plus value, function, and higher-order function annotations such as `let ada : person = ...`, `let describe (person : person) = ...`, and `let apply (f : int -> int) = ...`
-- Integer and float arithmetic, right-associative power `**`, comparison, equality, boolean, and integer `mod` operators
+- Integer and float arithmetic, right-associative power `**`, comparison, equality, short-circuit boolean, and integer `mod` operators
 - Sequencing with `expr; expr`; the left side must return `unit`, and the whole sequence has the right side's type
 - Forward pipelines with `value |> f`, equivalent to `f value`, including top-level functions, local closures, returned closures, and one-argument standard-library functions
 - Polymorphic functions, including constrained numeric variables displayed as `number -> number` and emitted with concrete int/float call-site specializations

@@ -64,8 +64,10 @@ export const ojamlExamples: OJamlExample[] = [
   let closed = false in
   let count = 3 in
   let ready = not closed && not (count = 0) in
+  let skipped = false && (println "skipped"; true) in
   println (String.concat "closed = " (to_string closed));
   println (String.concat "ready = " (to_string ready));
+  println (String.concat "skipped = " (to_string skipped));
   if ready || not closed then count else 0`,
   },
   {

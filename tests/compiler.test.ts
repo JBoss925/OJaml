@@ -495,6 +495,46 @@ test("not works with booleans, comparisons, conditionals, and double negation", 
   assert.equal(result.value, 1);
 });
 
+test("boolean conjunction and disjunction short-circuit right-hand effects", async () => {
+  const result = await runOJaml(`let mark (text : string) (value : bool) =
+  print text;
+  value
+
+let main =
+  let a = false && mark "bad-and" true in
+  let b = true || mark "bad-or" false in
+  let c = true && mark "good-and" true in
+  let d = false || mark "good-or" true in
+  if (not a) && b && c && d then 1 else 0`);
+
+  assert.equal(result.value, 1);
+  assert.equal(result.output, "good-andgood-or");
+});
+
+test("boolean short-circuiting skips runtime traps in unreachable operands", async () => {
+  const result = await runOJaml(`let main =
+  let m = Map.empty () in
+  let missing_map = false && (Map.get m "missing" = 1) in
+  let missing_array = true || (Array.get (Array.make 0 1) 0 = 1) in
+  if missing_map || missing_array then 7 else 0`);
+
+  assert.equal(result.value, 7);
+});
+
+test("boolean short-circuiting still typechecks skipped operands", () => {
+  const cases = [
+    `let main = false && 1`,
+    `let main = true || "wrong"`,
+    `let main = false && (fun x -> x)`,
+  ];
+
+  for (const source of cases) {
+    const markers = getOJamlSyntaxMarkers(source, 8);
+    assert.equal(markers.length, 1, source);
+    assert.match(markers[0].message, /Type mismatch/, source);
+  }
+});
+
 test("not rejects non-boolean operands", () => {
   const cases = [
     `let main = not 1`,
@@ -2286,7 +2326,7 @@ const expectedExampleResults: Map<string, { mainType: string; value: number; out
   ["bindings", { mainType: "int", value: 1815, output: "name = Ada\nyear = 1815\nactive = true\n" }],
   ["integer-operators", { mainType: "int", value: 30, output: "10 + 4 = 14\nsum - 3 = 11\ndifference * 2 = 22\nproduct / 5 = 4\nproduct mod 5 = 2\n2 ** 3 = 8\n" }],
   ["float-operators", { mainType: "float", value: 14, output: "7.5 + 2.5 = 10\na - 1 = 9\nb * 2.0 = 18\nc / 3 = 6\n2.0 ** 3 = 8\n" }],
-  ["boolean-logic", { mainType: "int", value: 3, output: "closed = false\nready = true\n" }],
+  ["boolean-logic", { mainType: "int", value: 3, output: "closed = false\nready = true\nskipped = false\n" }],
   ["strings", { mainType: "int", value: 11, output: "greeting = hello world\nwords = [hello, world]\nlength = 11\n" }],
   ["open-modules", { mainType: "int", value: 10, output: "words = [hello, OJaml]\nhead = hello\nnums = [1, 2]\n" }],
   ["user-modules", { mainType: "int", value: 95, output: "Scores.total 10 20 = 34\ntotal 5 6 = 15\noffset 7 = 25\nqualified 8 = 20\nlocal bonus = 1\n" }],
