@@ -127,6 +127,31 @@ let main =
   direct + opened + offset 7 + qualified 8 + local`,
   },
   {
+    id: "module-types",
+    title: "Module Types",
+    source: `module Geometry = struct
+  type point = { x: int; y: int }
+  type label = Origin | Named of string
+
+  let origin : point = { x = 0; y = 0 }
+
+  let move (point : point) dx dy : point =
+    { x = point.x + dx; y = point.y + dy }
+
+  let label_length label =
+    match label with
+    | Origin -> 0
+    | Named name -> String.length name
+end
+
+let main =
+  let point : Geometry.point = Geometry.move Geometry.origin 3 4 in
+  let label = Geometry.Named "corner" in
+  let _ = println (String.concat "point = " (to_string point)) in
+  let _ = println (String.concat "label length = " (to_string (Geometry.label_length label))) in
+  point.x + point.y + Geometry.label_length label`,
+  },
+  {
     id: "sequencing",
     title: "Sequencing",
     source: `let main =

@@ -31,7 +31,7 @@ export type ModuleDeclaration = {
   kind: "Module";
   name: string;
   nameSpan: SourceSpan;
-  declarations: Array<Declaration | ModuleDeclaration>;
+  declarations: Array<Declaration | TypeDeclaration | ModuleDeclaration>;
   span: SourceSpan;
 };
 

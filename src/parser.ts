@@ -46,14 +46,16 @@ class Parser {
     const fullName = `${namePrefix}${nameToken.text}`;
     this.expect("equals", "Expected '=' in module declaration");
     this.expectKeyword("struct");
-    const declarations: Array<Declaration | ModuleDeclaration> = [];
+    const declarations: Array<Declaration | TypeDeclaration | ModuleDeclaration> = [];
     while (!this.at("keyword", "end")) {
       if (this.at("eof")) throw new OJamlError("Expected 'end' to close module", nameToken.start, nameToken.end);
-      if (this.at("keyword", "type") || this.at("keyword", "open")) {
+      if (this.at("keyword", "open")) {
         throw new OJamlError("Only value bindings are supported inside modules", this.peek().start, this.peek().end);
       }
       declarations.push(this.at("keyword", "module")
         ? this.parseModuleDeclaration(`${fullName}.`)
+        : this.at("keyword", "type")
+          ? this.parseTypeDeclaration(`${fullName}.`)
         : this.parseDeclaration(`${fullName}.`));
       this.match("semicolon2");
     }
@@ -67,7 +69,7 @@ class Parser {
     };
   }
 
-  private parseTypeDeclaration(): TypeDeclaration {
+  private parseTypeDeclaration(namePrefix = ""): TypeDeclaration {
     const start = this.expectKeyword("type").start;
     const params = this.parseTypeParams();
     const nameToken = this.expect("ident", "Expected type name after type");
@@ -81,11 +83,11 @@ class Parser {
           throw new OJamlError("Variant constructor names must start with an uppercase letter", constructor.start, constructor.end);
         }
         const payload = this.matchKeyword("of") ? this.parseTypeExpr() : undefined;
-        constructors.push({ name: constructor.text, nameSpan: { start: constructor.start, end: constructor.end }, payload });
+        constructors.push({ name: `${namePrefix}${constructor.text}`, nameSpan: { start: constructor.start, end: constructor.end }, payload });
       } while (this.at("pipe"));
       if (constructors.length === 0) throw new OJamlError("Expected variant constructor", nameToken.end, nameToken.end);
       this.ensureUniqueFields(constructors.map((constructor) => constructor.name), start, this.previous().end);
-      return { kind: "Type", name: nameToken.text, nameSpan: { start: nameToken.start, end: nameToken.end }, params, body: { kind: "Variant", constructors }, span: { start, end: this.previous().end } };
+      return { kind: "Type", name: `${namePrefix}${nameToken.text}`, nameSpan: { start: nameToken.start, end: nameToken.end }, params, body: { kind: "Variant", constructors }, span: { start, end: this.previous().end } };
     }
     this.expect("lbrace", "Expected record type body");
     const fields: Array<{ name: string; nameSpan: { start: number; end: number }; type: TypeExpr }> = [];
@@ -98,7 +100,7 @@ class Parser {
     }
     this.expect("rbrace", "Expected '}' in type declaration");
     this.ensureUniqueFields(fields.map((field) => field.name), start, this.previous().end);
-    return { kind: "Type", name: nameToken.text, nameSpan: { start: nameToken.start, end: nameToken.end }, params, body: { kind: "Record", fields }, span: { start, end: this.previous().end } };
+    return { kind: "Type", name: `${namePrefix}${nameToken.text}`, nameSpan: { start: nameToken.start, end: nameToken.end }, params, body: { kind: "Record", fields }, span: { start, end: this.previous().end } };
   }
 
   private parseTypeParams(): Array<{ name: string; span: { start: number; end: number } }> {

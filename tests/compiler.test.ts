@@ -1020,7 +1020,7 @@ test("user-defined modules reject duplicates, unknown opens, and invalid nested 
     `module Math = struct let value = 1 let value = 2 end\nlet main = 0`,
     `module Math = struct let value = 1 end\nopen Missing\nlet main = 0`,
     `module Outer = struct module Inner = struct let value = 1 end module Inner = struct let value = 2 end end\nlet main = 0`,
-    `module Outer = struct type thing = A end\nlet main = 0`,
+    `module Outer = struct open List end\nlet main = 0`,
   ];
 
   for (const source of cases) {
@@ -1407,6 +1407,63 @@ test("function parameter annotations reject unknown types and bad call shapes", 
   for (const source of cases) {
     const markers = getOJamlSyntaxMarkers(source, 8);
     assert.ok(markers.length > 0, source);
+  }
+});
+
+test("module-local record types support qualified and scoped annotations", async () => {
+  const result = await runOJaml(`module Geometry = struct
+  type point = { x: int; y: int }
+
+  let origin : point = { x = 0; y = 0 }
+  let move (point : point) dx dy : point =
+    { x = point.x + dx; y = point.y + dy }
+
+  module Labels = struct
+    type labeled = { label: string; point: point }
+
+    let describe (item : labeled) =
+      String.concat item.label (String.concat ":" (to_string item.point.x))
+  end
+end
+
+let main =
+  let moved : Geometry.point = Geometry.move Geometry.origin 3 4 in
+  let labeled : Geometry.Labels.labeled = { label = "p"; point = moved } in
+  let _ = println (Geometry.Labels.describe labeled) in
+  moved.x + moved.y`);
+
+  assert.equal(result.value, 7);
+  assert.equal(result.output, "p:3\n");
+});
+
+test("module-local variant types support qualified constructors and pattern matching", async () => {
+  const result = await runOJaml(`module Json = struct
+  type value = Null | Number of int | Text of string
+
+  let length (value : value) =
+    match value with
+    | Null -> 0
+    | Number number -> number
+    | Text text -> String.length text
+end
+
+let main =
+  Json.length Json.Null + Json.length (Json.Number 10) + Json.length (Json.Text "ojaml")`);
+
+  assert.equal(result.value, 15);
+});
+
+test("module-local type declarations reject duplicates, unknown references, and bad constructor use", () => {
+  const cases = [
+    `module Geometry = struct type point = { x: int } type point = { y: int } end\nlet main = 0`,
+    `module Geometry = struct type point = { x: missing } end\nlet main = 0`,
+    `module Geometry = struct type point = { x: int } end\nlet main = let p : point = { x = 0 } in p.x`,
+    `module Json = struct type value = Null | Number of int end\nlet main = Number 1`,
+    `module Json = struct type value = Null | Number of int end\nlet main = Json.Number "one"`,
+  ];
+
+  for (const source of cases) {
+    assert.ok(getOJamlSyntaxMarkers(source, 8).length > 0, source);
   }
 });
 
@@ -2006,6 +2063,7 @@ const expectedExampleResults: Map<string, { mainType: string; value: number; out
   ["strings", { mainType: "int", value: 11, output: "greeting = hello world\nwords = [hello, world]\nlength = 11\n" }],
   ["open-modules", { mainType: "int", value: 10, output: "words = [hello, OJaml]\nhead = hello\nnums = [1, 2]\n" }],
   ["user-modules", { mainType: "int", value: 95, output: "Scores.total 10 20 = 34\ntotal 5 6 = 15\noffset 7 = 25\nqualified 8 = 20\nlocal bonus = 1\n" }],
+  ["module-types", { mainType: "int", value: 13, output: "point = { x = 3; y = 4 }\nlabel length = 6\n" }],
   ["sequencing", { mainType: "int", value: 3, output: "first\nsecond\nitems = [1, 2, 3]\n" }],
   ["pipeline", { mainType: "int", value: 12, output: "nums = [1, 2, 3]\ntotal = 12\n" }],
   ["arrays", { mainType: "int", value: 60, output: "scores = [10, 20, 30]\nlength = 3\ntotal = 60\n" }],

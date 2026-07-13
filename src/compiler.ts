@@ -1,4 +1,4 @@
-import type { Declaration, Expr, ModuleDeclaration, OpenDeclaration, Pattern, Program } from "./ast";
+import type { Declaration, Expr, ModuleDeclaration, OpenDeclaration, Pattern, Program, TypeDeclaration } from "./ast";
 import { check, type CheckedSymbol, type CheckedToken, type OJamlType, type RuntimeMainType } from "./check";
 import { parse } from "./parser";
 
@@ -15,6 +15,7 @@ type LambdaInfo = {
   body: Expr;
   captures: string[];
   scopedAliases: Map<string, string>;
+  scopedConstructorAliases: Map<string, string>;
 };
 
 type ConstructorInfo = {
@@ -121,7 +122,19 @@ function emitDeclaration(
   for (const param of declaration.params) locals.add(param);
   const localTypes = collectLocalTypes(declaration, globalTypes, checkedLocals, openAliases);
   const localLines = [...locals].filter((name) => !declaration.params.includes(name)).map((name) => `  (local $${safe(name)} i32)`);
-  const body = emitExpr(declaration.value, new EmitContext(globals, locals, localTypes, globalTypes, strings, tokenTypes, constructors, openAliases, new Map(), moduleMemberAliases(declaration.name, globals)));
+  const body = emitExpr(declaration.value, new EmitContext(
+    globals,
+    locals,
+    localTypes,
+    globalTypes,
+    strings,
+    tokenTypes,
+    constructors,
+    openAliases,
+    new Map(),
+    moduleMemberAliases(declaration.name, globals),
+    moduleConstructorAliases(declaration.name, constructors),
+  ));
   const head = `(func $${safe(nameOverride)} ${params}${params ? " " : ""}(result i32)`;
   return [head, ...localLines, indent(body, 2), ")"].join("\n");
 }
@@ -142,6 +155,7 @@ class EmitContext {
     readonly openAliases = new Map<string, string>(),
     readonly captured = new Map<string, number>(),
     readonly scopedAliases = new Map<string, string>(),
+    readonly scopedConstructorAliases = new Map<string, string>(),
   ) {}
 
   nextMatchLocal(): string {
@@ -167,6 +181,10 @@ class EmitContext {
     if (this.scopedAliases.has(name)) return this.scopedAliases.get(name)!;
     if (this.globals.has(name)) return name;
     return this.openAliases.get(name) || name;
+  }
+
+  resolveConstructor(name: string): string {
+    return this.scopedConstructorAliases.get(name) ?? name;
   }
 }
 
@@ -200,7 +218,9 @@ function emitExpr(expr: Expr, context: EmitContext): string {
       return recordField(emitExpr(expr.record, context), index);
     }
     case "Var":
-      if (context.constructors.has(expr.name) && !context.constructors.get(expr.name)!.hasPayload) return emitVariantConstructor(context.constructors.get(expr.name)!);
+      if (context.constructors.has(context.resolveConstructor(expr.name)) && !context.constructors.get(context.resolveConstructor(expr.name))!.hasPayload) {
+        return emitVariantConstructor(context.constructors.get(context.resolveConstructor(expr.name))!);
+      }
       if (context.locals.has(expr.name)) return `(local.get $${safe(expr.name)})`;
       if (context.captured.has(expr.name)) return `(i32.load (i32.add (local.get $__env) (i32.const ${4 + context.captured.get(expr.name)! * 4})))`;
       {
@@ -250,8 +270,8 @@ function emitExpr(expr: Expr, context: EmitContext): string {
 }
 
 function emitCall(callee: Expr, args: Expr[], context: EmitContext): string {
-  if (callee.kind === "Var" && context.constructors.has(callee.name)) {
-    return emitVariantConstructor(context.constructors.get(callee.name)!, args[0], context);
+  if (callee.kind === "Var" && context.constructors.has(context.resolveConstructor(callee.name))) {
+    return emitVariantConstructor(context.constructors.get(context.resolveConstructor(callee.name))!, args[0], context);
   }
   if (callee.kind === "Var" && (context.resolveName(callee.name) === "print" || context.resolveName(callee.name) === "println")) {
     const argShape = context.exprType(args[0]);
@@ -450,7 +470,7 @@ function emitPatternTest(pattern: Pattern, value: string, context: EmitContext):
     case "PMap":
       return emitLinkedMapPatternTest(pattern.entries, value, context);
     case "PConstructor": {
-      const constructor = context.constructors.get(pattern.name);
+      const constructor = context.constructors.get(context.resolveConstructor(pattern.name));
       if (!constructor) return `(i32.const 0)`;
       const tagTest = `(i32.and (i32.ne ${value} (i32.const 0)) (i32.eq (i32.load ${value}) (i32.const ${constructor.tag})))`;
       return pattern.payload ? `(i32.and ${tagTest} ${emitPatternTest(pattern.payload, variantPayload(value), context)})` : tagTest;
@@ -633,7 +653,7 @@ function emitClosure(expr: Extract<Expr, { kind: "Fun" }>, context: EmitContext,
   const captures = [...freeVars(expr.body, new Set(expr.params))].filter((name) => context.locals.has(name) || context.captured.has(name));
   const id = nextLambdaId++;
   const index = nextTableIndex++;
-  lambdaInfos.push({ id, index, params: expr.params, body: expr.body, captures, scopedAliases: new Map(context.scopedAliases) });
+  lambdaInfos.push({ id, index, params: expr.params, body: expr.body, captures, scopedAliases: new Map(context.scopedAliases), scopedConstructorAliases: new Map(context.scopedConstructorAliases) });
   const stores = captures.map((name, captureIndex) => {
     const value = name === selfName
       ? `(local.get $__closure)`
@@ -693,7 +713,7 @@ function emitPendingLambdas(
       .filter((name) => !lambda.params.includes(name))
       .map((name) => `  (local $${safe(name)} i32)`);
     const params = lambda.params.map((param) => `(param $${safe(param)} i32)`).join(" ");
-    const body = emitExpr(lambda.body, new EmitContext(globals, locals, localTypes, globalTypes, strings, tokenTypes, constructors, openAliases, captured, lambda.scopedAliases));
+    const body = emitExpr(lambda.body, new EmitContext(globals, locals, localTypes, globalTypes, strings, tokenTypes, constructors, openAliases, captured, lambda.scopedAliases, lambda.scopedConstructorAliases));
     emitted.push([`(func $__lambda_${lambda.id} (param $__env i32) ${params} (result i32)`, ...localLines, indent(body, 2), ")"].join("\n"));
   }
   return emitted.join("\n\n");
@@ -749,7 +769,11 @@ function letDeclarations(program: Program): Declaration[] {
 }
 
 function moduleLetDeclarations(declaration: ModuleDeclaration): Declaration[] {
-  return declaration.declarations.flatMap((member) => member.kind === "Let" ? [member] : moduleLetDeclarations(member));
+  return declaration.declarations.flatMap((member) => {
+    if (member.kind === "Let") return [member];
+    if (member.kind === "Module") return moduleLetDeclarations(member);
+    return [];
+  });
 }
 
 function moduleDeclarations(program: Program): ModuleDeclaration[] {
@@ -804,10 +828,25 @@ function moduleMemberAliases(name: string, globals: Map<string, number>): Map<st
   return aliases;
 }
 
+function moduleConstructorAliases(name: string, constructors: Map<string, ConstructorInfo>): Map<string, string> {
+  const parts = name.split(".");
+  if (parts.length < 2) return new Map();
+  const aliases = new Map<string, string>();
+  for (let i = 1; i < parts.length; i++) {
+    const prefix = `${parts.slice(0, i).join(".")}.`;
+    for (const key of constructors.keys()) {
+      if (!key.startsWith(prefix)) continue;
+      const alias = key.slice(prefix.length);
+      if (!alias.includes(".")) aliases.set(alias, key);
+    }
+  }
+  return aliases;
+}
+
 function collectConstructorInfos(program: Program): Map<string, ConstructorInfo> {
   const constructors = new Map<string, ConstructorInfo>();
-  for (const declaration of program.declarations) {
-    if (declaration.kind !== "Type" || declaration.body.kind !== "Variant") continue;
+  for (const declaration of typeDeclarations(program)) {
+    if (declaration.body.kind !== "Variant") continue;
     declaration.body.constructors.forEach((constructor, tag) => {
       constructors.set(constructor.name, {
         name: constructor.name,
@@ -818,6 +857,22 @@ function collectConstructorInfos(program: Program): Map<string, ConstructorInfo>
     });
   }
   return constructors;
+}
+
+function typeDeclarations(program: Program): TypeDeclaration[] {
+  return program.declarations.flatMap((declaration) => {
+    if (declaration.kind === "Type") return [declaration];
+    if (declaration.kind === "Module") return moduleTypeDeclarations(declaration);
+    return [];
+  });
+}
+
+function moduleTypeDeclarations(declaration: ModuleDeclaration): TypeDeclaration[] {
+  return declaration.declarations.flatMap((member) => {
+    if (member.kind === "Type") return [member];
+    if (member.kind === "Module") return moduleTypeDeclarations(member);
+    return [];
+  });
 }
 
 function collectLocalTypes(declaration: Declaration, globalTypes: Map<string, ValueShape>, checkedLocals = new Map<string, ValueShape>(), openAliases = new Map<string, string>()): Map<string, ValueShape> {
