@@ -157,7 +157,7 @@ let main =
     id: "module-signatures",
     title: "Module Signatures",
     source: `module type COUNTER = sig
-  type counter
+  type counter = Counter of int
   val start : counter
   val step : counter -> counter
   val value : counter -> int

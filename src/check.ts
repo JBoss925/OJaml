@@ -295,6 +295,7 @@ function checkModuleSignatureAscriptions(
         throw new OJamlError(`Type '${entry.name}' expects ${entry.params.length} type parameter(s) in module signature`, entry.nameSpan.start, entry.nameSpan.end);
       }
       localTypeAliases.set(entry.name, typeName);
+      if (entry.body) checkSignatureTypeManifest(entry, binding.declaration, context, localTypeAliases);
     }
     for (const entry of signature.entries) {
       if (entry.kind !== "Val") continue;
@@ -307,6 +308,66 @@ function checkModuleSignatureAscriptions(
       unify(binding.type, expected, entry.type.span);
     }
   }
+}
+
+function checkSignatureTypeManifest(
+  entry: Extract<ModuleSignatureEntry, { kind: "Type" }>,
+  declaration: TypeDeclaration,
+  context: CheckContext,
+  localTypeAliases: Map<string, string>,
+): void {
+  const body = entry.body;
+  if (!body) return;
+  if (body.kind !== declaration.body.kind) {
+    throw new OJamlError(`Type '${entry.name}' does not match its signature manifest`, entry.nameSpan.start, entry.nameSpan.end);
+  }
+  const typeVars = new Map<string, Type>();
+  entry.params.forEach((param) => typeVars.set(param.name, typeVar()));
+  const declarationTypeVars = typeParamVars(declaration);
+  if (body.kind === "Record" && declaration.body.kind === "Record") {
+    const expectedFields = sortedSignatureFields(body.fields);
+    const actualFields = sortedFields(declaration.body.fields);
+    if (expectedFields.length !== actualFields.length) {
+      throw new OJamlError(`Type '${entry.name}' does not match its signature manifest`, entry.nameSpan.start, entry.nameSpan.end);
+    }
+    expectedFields.forEach((expected, index) => {
+      const actual = actualFields[index];
+      if (expected.name !== actual.name) {
+        throw new OJamlError(`Type '${entry.name}' does not match its signature manifest`, expected.nameSpan.start, expected.nameSpan.end);
+      }
+      const expectedType = resolveTypeExpr(expected.type, context.types, typeVars, localTypeAliases, context.openTypeAliases);
+      const actualType = resolveTypeExpr(actual.type, context.types, declarationTypeVars, moduleTypeAliases(declaration.name, context.types), context.openTypeAliases);
+      unify(actualType, expectedType, expected.type.span);
+    });
+    return;
+  }
+  if (body.kind === "Variant" && declaration.body.kind === "Variant") {
+    if (body.constructors.length !== declaration.body.constructors.length) {
+      throw new OJamlError(`Type '${entry.name}' does not match its signature manifest`, entry.nameSpan.start, entry.nameSpan.end);
+    }
+    body.constructors.forEach((expected, index) => {
+      const actual = declaration.body.kind === "Variant" ? declaration.body.constructors[index] : undefined;
+      if (!actual || expected.name !== actual.name.split(".").at(-1)) {
+        throw new OJamlError(`Type '${entry.name}' does not match its signature manifest`, expected.nameSpan.start, expected.nameSpan.end);
+      }
+      if (Boolean(expected.payload) !== Boolean(actual.payload)) {
+        throw new OJamlError(`Constructor '${expected.name}' does not match its signature payload`, expected.nameSpan.start, expected.nameSpan.end);
+      }
+      if (expected.payload && actual.payload) {
+        const expectedType = resolveTypeExpr(expected.payload, context.types, typeVars, localTypeAliases, context.openTypeAliases);
+        const actualType = resolveTypeExpr(actual.payload, context.types, declarationTypeVars, moduleTypeAliases(declaration.name, context.types), context.openTypeAliases);
+        unify(actualType, expectedType, expected.payload.span);
+      }
+    });
+  }
+}
+
+function sortedFields<T extends { name: string }>(fields: T[]): T[] {
+  return [...fields].sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function sortedSignatureFields(fields: Extract<TypeDeclaration["body"], { kind: "Record" }>["fields"]): Extract<TypeDeclaration["body"], { kind: "Record" }>["fields"] {
+  return sortedFields(fields);
 }
 
 function typeExprVars(typeExpr: TypeExpr, vars = new Map<string, Type>()): Map<string, Type> {

@@ -1600,6 +1600,35 @@ let main =
   assert.equal(result.value, 42);
 });
 
+test("module signature type manifests check record and variant structure", async () => {
+  const result = await runOJaml(`module type SHAPES = sig
+  type point = { x: int; y: int }
+  type label = Origin | Named of string
+  val origin : point
+  val named : string -> label
+  val score : point -> label -> int
+end
+
+module Shapes : SHAPES = struct
+  type point = { y: int; x: int }
+  type label = Origin | Named of string
+
+  let origin : point = { x = 3; y = 4 }
+  let named text = Named text
+  let score (point : point) label =
+    let label_score =
+      match label with
+      | Origin -> 0
+      | Named text -> String.length text
+    in
+    point.x + point.y + label_score
+end
+
+let main = Shapes.score Shapes.origin (Shapes.named "edge")`);
+
+  assert.equal(result.value, 11);
+});
+
 test("function type annotations constrain higher-order values", async () => {
   const result = await runOJaml(`let apply_twice (f : int -> int) x =
   f (f x)
@@ -1635,7 +1664,14 @@ let main = 0`,
     `module type BAD = sig type 'a item val make : int item end
 module Items : BAD = struct type item = Item of int let make = Item 1 end
 let main = 0`,
-    `module type BAD = sig type item = { id: int } end
+    `module type BAD = sig type item = { id: int; label: string } end
+module Items : BAD = struct type item = { id: int } let item = { id = 1 } end
+let main = 0`,
+    `module type BAD = sig type item = A | B of string end
+module Items : BAD = struct type item = A | B of int let item = A end
+let main = 0`,
+    `module type BAD = sig type item = A | B end
+module Items : BAD = struct type item = B | A let item = A end
 let main = 0`,
   ];
 
