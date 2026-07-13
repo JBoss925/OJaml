@@ -157,22 +157,31 @@ let main =
     id: "module-signatures",
     title: "Module Signatures",
     source: `module type COUNTER = sig
-  val start : int
-  val step : int -> int
-  val format : int -> string
+  type counter
+  val start : counter
+  val step : counter -> counter
+  val value : counter -> int
+  val format : counter -> string
 end
 
 module Counter : COUNTER = struct
-  let start = 10
-  let step value = value + 1
-  let format value = String.concat "count = " (to_string value)
+  type counter = Counter of int
+
+  let start = Counter 10
+  let step counter =
+    match counter with
+    | Counter value -> Counter (value + 1)
+  let value counter =
+    match counter with
+    | Counter value -> value
+  let format counter = String.concat "count = " (to_string (value counter))
 end
 
 let main =
-  let next : int -> int = Counter.step in
+  let next : Counter.counter -> Counter.counter = Counter.step in
   let value = next Counter.start in
   let _ = println (Counter.format value) in
-  value`,
+  Counter.value value`,
   },
   {
     id: "sequencing",

@@ -71,6 +71,7 @@ let main = Outer.Inner.value`);
 
 test("parses module type declarations and module signature ascription", () => {
   const ast = parse(`module type ARITH = sig
+  type counter
   val add : int -> int -> int
   val label : string
 end
@@ -86,7 +87,7 @@ let main = Math.add 1 2`);
 
   assert.equal(signature.kind, "ModuleType");
   assert.equal(signature.kind === "ModuleType" ? signature.name : undefined, "ARITH");
-  assert.equal(signature.kind === "ModuleType" ? signature.entries.length : undefined, 2);
+  assert.equal(signature.kind === "ModuleType" ? signature.entries.length : undefined, 3);
   assert.equal(moduleDeclaration.signature?.name, "ARITH");
 });
 
@@ -1546,6 +1547,8 @@ let main = match A.Done with | Done -> 1`,
 
 test("module signatures check exported value shapes", async () => {
   const result = await runOJaml(`module type GEOMETRY = sig
+  type point
+  type label
   val origin : point
   val move : point -> int -> int -> point
   val describe : label -> string
@@ -1573,6 +1576,30 @@ let main =
   assert.equal(result.output, "corner\n");
 });
 
+test("module signature type entries support polymorphic module-local types", async () => {
+  const result = await runOJaml(`module type BOXES = sig
+  type 'a box
+  val wrap : 'a -> 'a box
+  val unwrap : 'a box -> 'a
+end
+
+module Boxes : BOXES = struct
+  type 'a box = Box of 'a
+
+  let wrap value = Box value
+  let unwrap box =
+    match box with
+    | Box value -> value
+end
+
+let main =
+  let number = Boxes.unwrap (Boxes.wrap 40) in
+  let text = Boxes.unwrap (Boxes.wrap "ok") in
+  number + String.length text`);
+
+  assert.equal(result.value, 42);
+});
+
 test("function type annotations constrain higher-order values", async () => {
   const result = await runOJaml(`let apply_twice (f : int -> int) x =
   f (f x)
@@ -1584,7 +1611,7 @@ let main =
   assert.equal(result.value, 42);
 });
 
-test("module signatures reject missing values, wrong value types, duplicates, and unknown signatures", () => {
+test("module signatures reject missing values, wrong value types, missing types, duplicate entries, and unknown signatures", () => {
   const cases = [
     `module type NEEDS_VALUE = sig val total : int end
 module Scores : NEEDS_VALUE = struct let other = 1 end
@@ -1601,6 +1628,14 @@ let main = 0`,
 module Scores : BAD = struct let x = 1 end
 let main = 0`,
     `module type BAD = sig val x : int val x : int end
+let main = 0`,
+    `module type BAD = sig type item val make : item end
+module Items : BAD = struct let make = 1 end
+let main = 0`,
+    `module type BAD = sig type 'a item val make : int item end
+module Items : BAD = struct type item = Item of int let make = Item 1 end
+let main = 0`,
+    `module type BAD = sig type item = { id: int } end
 let main = 0`,
   ];
 

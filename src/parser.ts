@@ -54,7 +54,7 @@ class Parser {
       this.match("semicolon2");
     }
     const end = this.expectKeyword("end").end;
-    this.ensureUniqueFields(entries.map((entry) => entry.name), start, end);
+    this.ensureUniqueFields(entries.map((entry) => `${entry.kind}:${entry.name}`), start, end);
     return {
       kind: "ModuleType",
       name: nameToken.text,
@@ -65,6 +65,21 @@ class Parser {
   }
 
   private parseModuleSignatureEntry(): ModuleSignatureEntry {
+    if (this.at("keyword", "type")) {
+      const start = this.expectKeyword("type").start;
+      const params = this.parseTypeParams();
+      const name = this.expect("ident", "Expected type name in module signature");
+      if (this.at("equals")) {
+        throw new OJamlError("Module signatures currently support abstract type entries only", this.peek().start, this.peek().end);
+      }
+      return {
+        kind: "Type",
+        name: name.text,
+        nameSpan: { start: name.start, end: name.end },
+        params,
+        span: { start, end: name.end },
+      };
+    }
     const start = this.expectKeyword("val").start;
     const name = this.expect("ident", "Expected value name in module signature");
     this.expect("colon", "Expected ':' in value signature");

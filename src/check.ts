@@ -285,16 +285,50 @@ function checkModuleSignatureAscriptions(
     }
     const localTypeAliases = moduleTypeAliases(moduleDeclaration.name, context.types);
     for (const entry of signature.entries) {
+      if (entry.kind !== "Type") continue;
+      const typeName = `${moduleDeclaration.name}.${entry.name}`;
+      const binding = context.types.get(typeName);
+      if (!binding || binding.kind !== "declared") {
+        throw new OJamlError(`Module '${moduleDeclaration.name}' does not provide type '${entry.name}' required by '${signature.declaration.name}'`, entry.nameSpan.start, entry.nameSpan.end);
+      }
+      if (binding.declaration.params.length !== entry.params.length) {
+        throw new OJamlError(`Type '${entry.name}' expects ${entry.params.length} type parameter(s) in module signature`, entry.nameSpan.start, entry.nameSpan.end);
+      }
+      localTypeAliases.set(entry.name, typeName);
+    }
+    for (const entry of signature.entries) {
       if (entry.kind !== "Val") continue;
       const memberName = `${moduleDeclaration.name}.${entry.name}`;
       const binding = globals.get(memberName);
       if (!binding) {
         throw new OJamlError(`Module '${moduleDeclaration.name}' does not provide value '${entry.name}' required by '${signature.declaration.name}'`, entry.nameSpan.start, entry.nameSpan.end);
       }
-      const expected = resolveTypeExpr(entry.type, context.types, new Map(), localTypeAliases, context.openTypeAliases);
+      const expected = resolveTypeExpr(entry.type, context.types, typeExprVars(entry.type), localTypeAliases, context.openTypeAliases);
       unify(binding.type, expected, entry.type.span);
     }
   }
+}
+
+function typeExprVars(typeExpr: TypeExpr, vars = new Map<string, Type>()): Map<string, Type> {
+  switch (typeExpr.kind) {
+    case "TVar":
+      if (!vars.has(typeExpr.name)) vars.set(typeExpr.name, typeVar());
+      break;
+    case "TFn":
+      typeExpr.params.forEach((param) => typeExprVars(param, vars));
+      typeExprVars(typeExpr.result, vars);
+      break;
+    case "TTuple":
+      typeExpr.items.forEach((item) => typeExprVars(item, vars));
+      break;
+    case "TApp":
+      typeExpr.args.forEach((arg) => typeExprVars(arg, vars));
+      break;
+    case "TRecord":
+      typeExpr.fields.forEach((field) => typeExprVars(field.type, vars));
+      break;
+  }
+  return vars;
 }
 
 function resolveOpenAlias(name: string, aliases: Map<string, string>, span: SourceSpan): string | undefined {

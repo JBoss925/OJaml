@@ -45,7 +45,8 @@ export type ModuleTypeDeclaration = {
 };
 
 export type ModuleSignatureEntry =
-  | { kind: "Val"; name: string; nameSpan: SourceSpan; type: TypeExpr; span: SourceSpan };
+  | { kind: "Val"; name: string; nameSpan: SourceSpan; type: TypeExpr; span: SourceSpan }
+  | { kind: "Type"; name: string; nameSpan: SourceSpan; params: Array<{ name: string; span: SourceSpan }>; span: SourceSpan };
 
 export type TypeExpr =
   | { kind: "TName"; name: string; span: SourceSpan }

@@ -33,7 +33,7 @@ Supported language features:
 
 - `let` and `let rec` top-level bindings
 - Top-level and nested modules with `module Name = struct ... end`
-- Module type declarations with `val` signatures and module ascription with `module Name : SIGNATURE = struct ... end`
+- Module type declarations with abstract `type` entries, `val` signatures, and module ascription with `module Name : SIGNATURE = struct ... end`
 - Top-level `open` declarations for built-in standard-library namespaces and user-defined modules
 - Local `let ... in ...`, local function bindings, and local `let rec` function bindings
 - Anonymous functions and first-class function values, including high-arity function values and staged closures that return more high-arity functions
@@ -100,7 +100,7 @@ Map.has : ('k, 'v) map -> 'k -> bool
 
 All standard-library functions have explicit type schemes so editor hovers, type errors, and autocomplete remain statically meaningful.
 
-Modules group related `let`, `let rec`, record type, and algebraic data type declarations under a qualified namespace. Module members can refer to sibling values, types, and constructors by short name inside the module; nested modules can refer to values and types from enclosing modules; members can be called through qualified names such as `Scores.total` or `Scores.Offsets.make`; and user modules can be opened so their immediate values, types, and constructors are available by short name. Module type declarations can require exported values with `val` signatures, and `module Scores : SCORE_API = struct ... end` checks that the implementation provides each promised value at the declared type. User modules currently contain values, nested modules, and type declarations; full signature type items and functors are not implemented yet.
+Modules group related `let`, `let rec`, record type, and algebraic data type declarations under a qualified namespace. Module members can refer to sibling values, types, and constructors by short name inside the module; nested modules can refer to values and types from enclosing modules; members can be called through qualified names such as `Scores.total` or `Scores.Offsets.make`; and user modules can be opened so their immediate values, types, and constructors are available by short name. Module type declarations can require abstract type entries and exported values with `val` signatures, and `module Scores : SCORE_API = struct ... end` checks that the implementation provides each promised type and value at the declared type. User modules currently contain values, nested modules, and type declarations; concrete signature type manifests and functors are not implemented yet.
 
 ```ocaml
 module Scores = struct
