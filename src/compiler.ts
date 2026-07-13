@@ -1325,6 +1325,7 @@ function inferCallShape(expr: Extract<Expr, { kind: "Call" }>, types: Map<string
     return array.kind === "array" ? array.elem : unknownShape;
   }
   if (name === "Array.length") return intShape;
+  if (name === "Array.exists" || name === "Array.for_all") return boolShape;
   if (name === "Array.iter") return unitShape;
   if (name === "Array.fold_left") return inferSimpleType(expr.args[1], types, openAliases);
   if (name === "List.empty") return { kind: "list", elem: unknownShape };
@@ -1353,7 +1354,8 @@ function inferCallShape(expr: Extract<Expr, { kind: "Call" }>, types: Map<string
     const list = inferSimpleType(expr.args[0], types, openAliases);
     return list.kind === "list" ? list : { kind: "list", elem: unknownShape };
   }
-  if (name === "List.length" || name === "List.is_empty") return intShape;
+  if (name === "List.length") return intShape;
+  if (name === "List.is_empty" || name === "List.exists" || name === "List.for_all") return boolShape;
   if (name === "List.iter") return unitShape;
   if (name === "List.fold_left") return inferSimpleType(expr.args[1], types, openAliases);
   if (name === "Set.empty") return { kind: "set", elem: unknownShape };
@@ -1600,6 +1602,8 @@ function builtinArities(): Array<[string, number]> {
     ["Array.reverse", 1],
     ["Array.map", 2],
     ["Array.filter", 2],
+    ["Array.exists", 2],
+    ["Array.for_all", 2],
     ["Array.iter", 2],
     ["Array.fold_left", 3],
     ["List.empty", 1],
@@ -1612,6 +1616,8 @@ function builtinArities(): Array<[string, number]> {
     ["List.reverse", 1],
     ["List.map", 2],
     ["List.filter", 2],
+    ["List.exists", 2],
+    ["List.for_all", 2],
     ["List.iter", 2],
     ["List.fold_left", 3],
     ["Set.empty", 1],
@@ -1634,6 +1640,7 @@ function builtinReturnShape(name: string): ValueShape {
   if (name === "String.concat") return stringShape;
   if (name === "String.length") return intShape;
   if (name === "String.split") return { kind: "list", elem: stringShape };
+  if (name === "Array.exists" || name === "Array.for_all" || name === "List.is_empty" || name === "List.exists" || name === "List.for_all") return boolShape;
   if (name === "Array.make") return { kind: "array", elem: unknownShape };
   if (name === "Array.append" || name === "Array.reverse" || name === "Array.map" || name === "Array.filter") return { kind: "array", elem: unknownShape };
   if (name === "List.empty" || name === "List.cons" || name === "List.tail") return { kind: "list", elem: unknownShape };
@@ -1863,6 +1870,48 @@ function emitStdlibWat(): string {
   (local.get $result)
 )
 
+(func $Array_exists (param $f i32) (param $array i32) (result i32)
+  (local $length i32)
+  (local $i i32)
+  (local.set $length (call $Array_length (local.get $array)))
+  (loop $loop
+    (if (i32.lt_s (local.get $i) (local.get $length))
+      (then
+        (if (call_indirect (type $fn_1)
+          (local.get $f)
+          (call $Array_get (local.get $array) (local.get $i))
+          (i32.load (local.get $f)))
+          (then (return (i32.const 1)))
+        )
+        (local.set $i (i32.add (local.get $i) (i32.const 1)))
+        (br $loop)
+      )
+    )
+  )
+  (i32.const 0)
+)
+
+(func $Array_for_all (param $f i32) (param $array i32) (result i32)
+  (local $length i32)
+  (local $i i32)
+  (local.set $length (call $Array_length (local.get $array)))
+  (loop $loop
+    (if (i32.lt_s (local.get $i) (local.get $length))
+      (then
+        (if (i32.eqz (call_indirect (type $fn_1)
+          (local.get $f)
+          (call $Array_get (local.get $array) (local.get $i))
+          (i32.load (local.get $f))))
+          (then (return (i32.const 0)))
+        )
+        (local.set $i (i32.add (local.get $i) (i32.const 1)))
+        (br $loop)
+      )
+    )
+  )
+  (i32.const 1)
+)
+
 (func $Array_iter (param $f i32) (param $array i32) (result i32)
   (local $length i32)
   (local $i i32)
@@ -2003,6 +2052,46 @@ function emitStdlibWat(): string {
           (call $List_filter (local.get $f) (call $List_tail (local.get $list)))))
     )
   )
+)
+
+(func $List_exists (param $f i32) (param $list i32) (result i32)
+  (local $cursor i32)
+  (local.set $cursor (local.get $list))
+  (loop $loop
+    (if (i32.ne (local.get $cursor) (i32.const 0))
+      (then
+        (if (call_indirect (type $fn_1)
+          (local.get $f)
+          (call $List_head (local.get $cursor))
+          (i32.load (local.get $f)))
+          (then (return (i32.const 1)))
+        )
+        (local.set $cursor (call $List_tail (local.get $cursor)))
+        (br $loop)
+      )
+    )
+  )
+  (i32.const 0)
+)
+
+(func $List_for_all (param $f i32) (param $list i32) (result i32)
+  (local $cursor i32)
+  (local.set $cursor (local.get $list))
+  (loop $loop
+    (if (i32.ne (local.get $cursor) (i32.const 0))
+      (then
+        (if (i32.eqz (call_indirect (type $fn_1)
+          (local.get $f)
+          (call $List_head (local.get $cursor))
+          (i32.load (local.get $f))))
+          (then (return (i32.const 0)))
+        )
+        (local.set $cursor (call $List_tail (local.get $cursor)))
+        (br $loop)
+      )
+    )
+  )
+  (i32.const 1)
 )
 
 (func $List_iter (param $f i32) (param $list i32) (result i32)

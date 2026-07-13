@@ -77,6 +77,8 @@ Array.append : 'a array -> 'a array -> 'a array
 Array.reverse : 'a array -> 'a array
 Array.map : ('a -> 'b) -> 'a array -> 'b array
 Array.filter : ('a -> bool) -> 'a array -> 'a array
+Array.exists : ('a -> bool) -> 'a array -> bool
+Array.for_all : ('a -> bool) -> 'a array -> bool
 Array.iter : ('a -> unit) -> 'a array -> unit
 Array.fold_left : ('b -> 'a -> 'b) -> 'b -> 'a array -> 'b
 
@@ -90,6 +92,8 @@ List.append : 'a list -> 'a list -> 'a list
 List.reverse : 'a list -> 'a list
 List.map : ('a -> 'b) -> 'a list -> 'b list
 List.filter : ('a -> bool) -> 'a list -> 'a list
+List.exists : ('a -> bool) -> 'a list -> bool
+List.for_all : ('a -> bool) -> 'a list -> bool
 List.iter : ('a -> unit) -> 'a list -> unit
 List.fold_left : ('b -> 'a -> 'b) -> 'b -> 'a list -> 'b
 

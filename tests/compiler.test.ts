@@ -1103,7 +1103,7 @@ test("polymorphic arrays store ints and strings through one API", async () => {
   assert.deepEqual(result.prints, ["array"]);
 });
 
-test("arrays expose length, set, get, append, reverse, map, filter, iter, and fold_left", async () => {
+test("arrays expose length, set, get, append, reverse, map, filter, exists, for_all, iter, and fold_left", async () => {
   const result = await runOJaml(`let main =
   let xs = Array.make 3 2 in
   let _ = Array.set xs 1 4 in
@@ -1112,10 +1112,12 @@ test("arrays expose length, set, get, append, reverse, map, filter, iter, and fo
   let reversed = Array.reverse joined in
   let ys = Array.map (fun x -> x + 1) reversed in
   let kept = Array.filter (fun x -> x > 3) ys in
+  let any_big = Array.exists (fun x -> x > 8) ys in
+  let all_positive = Array.for_all (fun x -> x > 0) ys in
   let _ = Array.iter (fun x -> print x) kept in
-  Array.get joined 0 + Array.get reversed 0 + Array.length joined + Array.length kept + Array.fold_left (fun acc x -> acc + x) 0 kept`);
+  Array.get joined 0 + Array.get reversed 0 + Array.length joined + Array.length kept + (if any_big then 1 else 0) + (if all_positive then 1 else 0) + Array.fold_left (fun acc x -> acc + x) 0 kept`);
 
-  assert.equal(result.value, 30);
+  assert.equal(result.value, 32);
   assert.deepEqual(result.prints, [9, 5]);
 });
 
@@ -1187,6 +1189,32 @@ test("array filter covers empty, all, none, closures, and polymorphic element va
   assert.equal(result.output, "[4]\n[tool, lang]\n");
 });
 
+test("array predicate helpers cover empty, short-circuiting, closures, and polymorphic values", async () => {
+  const result = await runOJaml(`let main =
+  let empty = Array.make 0 1 in
+  let xs = Array.make 4 1 in
+  let _ = Array.set xs 1 2 in
+  let _ = Array.set xs 2 3 in
+  let _ = Array.set xs 3 4 in
+  let threshold = 3 in
+  let any_empty = Array.exists (fun x -> x > 0) empty in
+  let all_empty = Array.for_all (fun x -> x > 0) empty in
+  let any_over_threshold = Array.exists (fun x -> x > threshold) xs in
+  let all_positive = Array.for_all (fun x -> x > 0) xs in
+  let all_even = Array.for_all (fun x -> x mod 2 = 0) xs in
+  let _ = Array.exists (fun x -> let _ = print x in x = 2) xs in
+  let _ = Array.for_all (fun x -> let _ = print x in x < 3) xs in
+  let words = Array.make 3 "a" in
+  let _ = Array.set words 1 "tool" in
+  let _ = Array.set words 2 "lang" in
+  let has_tool = Array.exists (fun word -> word = "tool") words in
+  let all_named = Array.for_all (fun word -> String.length word > 0) words in
+  (if any_empty then 1 else 0) + (if all_empty then 2 else 0) + (if any_over_threshold then 4 else 0) + (if all_positive then 8 else 0) + (if all_even then 16 else 0) + (if has_tool then 32 else 0) + (if all_named then 64 else 0)`);
+
+  assert.equal(result.value, 110);
+  assert.deepEqual(result.prints, [1, 2, 1, 2, 3]);
+});
+
 test("runtime checks reject invalid array access", async () => {
   await assert.rejects(
     () => runOJaml(`let main =
@@ -1239,7 +1267,7 @@ test("polymorphic lists store strings", async () => {
   assert.deepEqual(result.prints, ["head"]);
 });
 
-test("lists expose empty, cons, head, tail, is_empty, length, append, reverse, map, filter, iter, and fold_left", async () => {
+test("lists expose empty, cons, head, tail, is_empty, length, append, reverse, map, filter, exists, for_all, iter, and fold_left", async () => {
   const result = await runOJaml(`let main =
   let xs = List.cons 2 (List.cons 1 (List.empty ())) in
   let tail = List.tail xs in
@@ -1247,10 +1275,12 @@ test("lists expose empty, cons, head, tail, is_empty, length, append, reverse, m
   let reversed = List.reverse joined in
   let ys = List.map (fun x -> x * 3) reversed in
   let kept = List.filter (fun x -> x > 3) ys in
+  let any_big = List.exists (fun x -> x > 10) ys in
+  let all_positive = List.for_all (fun x -> x > 0) ys in
   let _ = List.iter (fun x -> print x) kept in
-  if List.is_empty tail then 0 else List.head joined + List.head reversed + List.length ys + List.length kept + List.fold_left (fun acc x -> acc + x) 0 kept`);
+  if List.is_empty tail then 0 else List.head joined + List.head reversed + List.length ys + List.length kept + (if any_big then 1 else 0) + (if all_positive then 1 else 0) + List.fold_left (fun acc x -> acc + x) 0 kept`);
 
-  assert.equal(result.value, 29);
+  assert.equal(result.value, 31);
   assert.deepEqual(result.prints, [12, 6]);
 });
 
@@ -1307,6 +1337,27 @@ test("list filter covers empty, all, none, closures, and polymorphic element val
 
   assert.equal(result.value, 11);
   assert.equal(result.output, "[4]\n[tool, lang]\n");
+});
+
+test("list predicate helpers cover empty, short-circuiting, closures, and polymorphic values", async () => {
+  const result = await runOJaml(`let main =
+  let empty = List.empty () in
+  let xs = List.cons 1 (List.cons 2 (List.cons 3 (List.cons 4 (List.empty ())))) in
+  let threshold = 3 in
+  let any_empty = List.exists (fun x -> x > 0) empty in
+  let all_empty = List.for_all (fun x -> x > 0) empty in
+  let any_over_threshold = List.exists (fun x -> x > threshold) xs in
+  let all_positive = List.for_all (fun x -> x > 0) xs in
+  let all_even = List.for_all (fun x -> x mod 2 = 0) xs in
+  let _ = List.exists (fun x -> let _ = print x in x = 2) xs in
+  let _ = List.for_all (fun x -> let _ = print x in x < 3) xs in
+  let words = List.cons "a" (List.cons "tool" (List.cons "lang" (List.empty ()))) in
+  let has_tool = List.exists (fun word -> word = "tool") words in
+  let all_named = List.for_all (fun word -> String.length word > 0) words in
+  (if any_empty then 1 else 0) + (if all_empty then 2 else 0) + (if any_over_threshold then 4 else 0) + (if all_positive then 8 else 0) + (if all_even then 16 else 0) + (if has_tool then 32 else 0) + (if all_named then 64 else 0)`);
+
+  assert.equal(result.value, 110);
+  assert.deepEqual(result.prints, [1, 2, 1, 2, 3]);
 });
 
 test("runtime checks reject empty list head and tail", async () => {
@@ -2464,8 +2515,8 @@ const expectedExampleResults: Map<string, { mainType: string; value: number; out
   ["module-signatures", { mainType: "int", value: 11, output: "count = 11\n" }],
   ["sequencing", { mainType: "int", value: 3, output: "first\nsecond\nitems = [1, 2, 3]\n" }],
   ["pipeline", { mainType: "int", value: 12, output: "nums = [1, 2, 3]\ntotal = 12\n" }],
-  ["arrays", { mainType: "int", value: 60, output: "scores = [10, 20, 30]\nall_scores = [10, 20, 30, 40]\nreversed_scores = [40, 30, 20, 10]\nhigh_scores = [20, 30, 40]\nlength = 3\ntotal = 60\n" }],
-  ["lists", { mainType: "int", value: 3, output: "items = [first, second, third]\nall_items = [first, second, third, fourth]\nreversed_items = [fourth, third, second, first]\nlong_items = [second, fourth]\nfirst = first\nrest = [second, third]\nlength = 3\n" }],
+  ["arrays", { mainType: "int", value: 60, output: "scores = [10, 20, 30]\nall_scores = [10, 20, 30, 40]\nreversed_scores = [40, 30, 20, 10]\nhigh_scores = [20, 30, 40]\nhas_bonus = true\nall_positive = true\nlength = 3\ntotal = 60\n" }],
+  ["lists", { mainType: "int", value: 3, output: "items = [first, second, third]\nall_items = [first, second, third, fourth]\nreversed_items = [fourth, third, second, first]\nlong_items = [second, fourth]\nhas_second = true\nall_named = true\nfirst = first\nrest = [second, third]\nlength = 3\n" }],
   ["maps", { mainType: "int", value: 1906, output: "years = { Grace: 1906, Ada: 1815 }\nAda = 1815\nGrace = found\n" }],
   ["sets", { mainType: "int", value: 2, output: "names = { Grace, Ada }\nhas Ada = true\n" }],
   ["tuples", { mainType: "int", value: 9, output: "point = (3, 4, 5)\nx = 3\ny = 4\nz = 5\nx + y = 7\nlabeled = (origin, (3, 4, 5))\npoints = [(3, 4, 5), (0, 0, 0)]\n" }],
@@ -2526,6 +2577,23 @@ test("array and list reverse reject non-collection operands", () => {
   const cases = [
     `let main = Array.length (Array.reverse 1)`,
     `let main = List.length (List.reverse "bad")`,
+  ];
+
+  for (const source of cases) {
+    const markers = getOJamlSyntaxMarkers(source, 8);
+    assert.equal(markers.length, 1, source);
+    assert.match(markers[0].message, /Type mismatch/);
+  }
+});
+
+test("array and list predicate helpers reject non-bool predicates and non-collection operands", () => {
+  const cases = [
+    `let main = Array.exists (fun x -> x + 1) (Array.make 1 0)`,
+    `let main = Array.for_all (fun x -> x + 1) (Array.make 1 0)`,
+    `let main = List.exists (fun x -> x + 1) (List.cons 1 (List.empty ()))`,
+    `let main = List.for_all (fun x -> x + 1) (List.cons 1 (List.empty ()))`,
+    `let main = Array.exists (fun x -> true) 1`,
+    `let main = List.for_all (fun x -> true) "bad"`,
   ];
 
   for (const source of cases) {

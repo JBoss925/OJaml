@@ -609,6 +609,14 @@ const stdlibSignatures: BuiltinSignature[] = [
     const a = typeVar();
     return fn([fn([a], boolType), app("array", [a])], app("array", [a]));
   }),
+  builtin("Array.exists", "Array.exists : ('a -> bool) -> 'a array -> bool", () => {
+    const a = typeVar();
+    return fn([fn([a], boolType), app("array", [a])], boolType);
+  }),
+  builtin("Array.for_all", "Array.for_all : ('a -> bool) -> 'a array -> bool", () => {
+    const a = typeVar();
+    return fn([fn([a], boolType), app("array", [a])], boolType);
+  }),
   builtin("Array.iter", "Array.iter : ('a -> unit) -> 'a array -> unit", () => {
     const a = typeVar();
     return fn([fn([a], unitType), app("array", [a])], unitType);
@@ -649,6 +657,14 @@ const stdlibSignatures: BuiltinSignature[] = [
   builtin("List.filter", "List.filter : ('a -> bool) -> 'a list -> 'a list", () => {
     const a = typeVar();
     return fn([fn([a], boolType), app("list", [a])], app("list", [a]));
+  }),
+  builtin("List.exists", "List.exists : ('a -> bool) -> 'a list -> bool", () => {
+    const a = typeVar();
+    return fn([fn([a], boolType), app("list", [a])], boolType);
+  }),
+  builtin("List.for_all", "List.for_all : ('a -> bool) -> 'a list -> bool", () => {
+    const a = typeVar();
+    return fn([fn([a], boolType), app("list", [a])], boolType);
   }),
   builtin("List.iter", "List.iter : ('a -> unit) -> 'a list -> unit", () => {
     const a = typeVar();

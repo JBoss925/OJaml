@@ -228,10 +228,14 @@ let main =
   let all_scores = Array.append scores bonus in
   let reversed_scores = Array.reverse all_scores in
   let high_scores = Array.filter (fun score -> score >= 20) all_scores in
+  let has_bonus = Array.exists (fun score -> score = 40) all_scores in
+  let all_positive = Array.for_all (fun score -> score > 0) all_scores in
   let _ = println (String.concat "scores = " (to_string scores)) in
   let _ = println (String.concat "all_scores = " (to_string all_scores)) in
   let _ = println (String.concat "reversed_scores = " (to_string reversed_scores)) in
   let _ = println (String.concat "high_scores = " (to_string high_scores)) in
+  let _ = println (String.concat "has_bonus = " (to_string has_bonus)) in
+  let _ = println (String.concat "all_positive = " (to_string all_positive)) in
   let _ = println (String.concat "length = " (to_string (Array.length scores))) in
   let _ = println (String.concat "total = " (to_string total)) in
   total`,
@@ -258,10 +262,14 @@ let main =
   let all_items = List.append items extra in
   let reversed_items = List.reverse all_items in
   let long_items = List.filter (fun item -> String.length item > 5) all_items in
+  let has_second = List.exists (fun item -> item = "second") all_items in
+  let all_named = List.for_all (fun item -> String.length item > 0) all_items in
   let _ = println (String.concat "items = " (to_string items)) in
   let _ = println (String.concat "all_items = " (to_string all_items)) in
   let _ = println (String.concat "reversed_items = " (to_string reversed_items)) in
   let _ = println (String.concat "long_items = " (to_string long_items)) in
+  let _ = println (String.concat "has_second = " (to_string has_second)) in
+  let _ = println (String.concat "all_named = " (to_string all_named)) in
   let _ = println (String.concat "first = " first) in
   let _ = println (String.concat "rest = " (to_string rest)) in
   let _ = println (String.concat "length = " (to_string (List.length items))) in
