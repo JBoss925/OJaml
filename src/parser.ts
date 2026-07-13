@@ -1,4 +1,4 @@
-import type { BinaryOp, Declaration, Expr, MatchArm, ModuleDeclaration, OpenDeclaration, Pattern, Program, TopLevelDeclaration, TypeDeclaration, TypeExpr } from "./ast";
+import type { BinaryOp, Declaration, Expr, MatchArm, ModuleDeclaration, ModuleSignatureEntry, ModuleTypeDeclaration, OpenDeclaration, Pattern, Program, TopLevelDeclaration, TypeDeclaration, TypeExpr } from "./ast";
 import { OJamlError } from "./errors";
 import { lex, type Token } from "./lexer";
 
@@ -19,6 +19,7 @@ class Parser {
       if (this.match("semicolon2")) continue;
       if (this.at("keyword", "type")) declarations.push(this.parseTypeDeclaration());
       else if (this.at("keyword", "open")) declarations.push(this.parseOpenDeclaration());
+      else if (this.at("keyword", "module") && this.tokens[this.index + 1]?.text === "type") declarations.push(this.parseModuleTypeDeclaration());
       else if (this.at("keyword", "module")) declarations.push(this.parseModuleDeclaration());
       else declarations.push(this.parseDeclaration());
       this.match("semicolon2");
@@ -37,6 +38,46 @@ class Parser {
     };
   }
 
+  private parseModuleTypeDeclaration(): ModuleTypeDeclaration {
+    const start = this.expectKeyword("module").start;
+    this.expectKeyword("type");
+    const nameToken = this.expect("ident", "Expected module type name");
+    if (!/^[A-Z]/.test(nameToken.text)) {
+      throw new OJamlError("Module type names must start with an uppercase letter", nameToken.start, nameToken.end);
+    }
+    this.expect("equals", "Expected '=' in module type declaration");
+    this.expectKeyword("sig");
+    const entries: ModuleSignatureEntry[] = [];
+    while (!this.at("keyword", "end")) {
+      if (this.at("eof")) throw new OJamlError("Expected 'end' to close module type", nameToken.start, nameToken.end);
+      entries.push(this.parseModuleSignatureEntry());
+      this.match("semicolon2");
+    }
+    const end = this.expectKeyword("end").end;
+    this.ensureUniqueFields(entries.map((entry) => entry.name), start, end);
+    return {
+      kind: "ModuleType",
+      name: nameToken.text,
+      nameSpan: { start: nameToken.start, end: nameToken.end },
+      entries,
+      span: { start, end },
+    };
+  }
+
+  private parseModuleSignatureEntry(): ModuleSignatureEntry {
+    const start = this.expectKeyword("val").start;
+    const name = this.expect("ident", "Expected value name in module signature");
+    this.expect("colon", "Expected ':' in value signature");
+    const type = this.parseTypeExpr();
+    return {
+      kind: "Val",
+      name: name.text,
+      nameSpan: { start: name.start, end: name.end },
+      type,
+      span: { start, end: type.span.end },
+    };
+  }
+
   private parseModuleDeclaration(namePrefix = ""): ModuleDeclaration {
     const start = this.expectKeyword("module").start;
     const nameToken = this.expect("ident", "Expected module name after module");
@@ -44,6 +85,12 @@ class Parser {
       throw new OJamlError("Module names must start with an uppercase letter", nameToken.start, nameToken.end);
     }
     const fullName = `${namePrefix}${nameToken.text}`;
+    const signature = this.match("colon")
+      ? (() => {
+          const token = this.expect("ident", "Expected module type name after ':'");
+          return { name: token.text, span: { start: token.start, end: token.end } };
+        })()
+      : undefined;
     this.expect("equals", "Expected '=' in module declaration");
     this.expectKeyword("struct");
     const declarations: Array<Declaration | TypeDeclaration | ModuleDeclaration> = [];
@@ -64,6 +111,7 @@ class Parser {
       kind: "Module",
       name: fullName,
       nameSpan: { start: nameToken.start, end: nameToken.end },
+      signature,
       declarations,
       span: { start, end },
     };
@@ -204,6 +252,13 @@ class Parser {
   }
 
   private parseTypeExpr(): TypeExpr {
+    const items = [this.parseTypeApplication()];
+    while (this.match("arrow")) items.push(this.parseTypeApplication());
+    if (items.length === 1) return items[0];
+    return { kind: "TFn", params: items.slice(0, -1), result: items[items.length - 1], span: { start: items[0].span.start, end: items[items.length - 1].span.end } };
+  }
+
+  private parseTypeApplication(): TypeExpr {
     let type = this.parseTypeAtom();
     while (this.at("ident") && this.canContinueTypeApplication()) {
       const token = this.advance();

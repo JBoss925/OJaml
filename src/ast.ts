@@ -7,7 +7,7 @@ export type Program = {
   declarations: TopLevelDeclaration[];
 };
 
-export type TopLevelDeclaration = Declaration | TypeDeclaration | OpenDeclaration | ModuleDeclaration;
+export type TopLevelDeclaration = Declaration | TypeDeclaration | OpenDeclaration | ModuleDeclaration | ModuleTypeDeclaration;
 
 export type OpenDeclaration = {
   kind: "Open";
@@ -31,13 +31,26 @@ export type ModuleDeclaration = {
   kind: "Module";
   name: string;
   nameSpan: SourceSpan;
+  signature?: { name: string; span: SourceSpan };
   declarations: Array<Declaration | TypeDeclaration | ModuleDeclaration>;
   span: SourceSpan;
 };
 
+export type ModuleTypeDeclaration = {
+  kind: "ModuleType";
+  name: string;
+  nameSpan: SourceSpan;
+  entries: ModuleSignatureEntry[];
+  span: SourceSpan;
+};
+
+export type ModuleSignatureEntry =
+  | { kind: "Val"; name: string; nameSpan: SourceSpan; type: TypeExpr; span: SourceSpan };
+
 export type TypeExpr =
   | { kind: "TName"; name: string; span: SourceSpan }
   | { kind: "TVar"; name: string; span: SourceSpan }
+  | { kind: "TFn"; params: TypeExpr[]; result: TypeExpr; span: SourceSpan }
   | { kind: "TTuple"; items: TypeExpr[]; span: SourceSpan }
   | { kind: "TApp"; name: string; args: TypeExpr[]; span: SourceSpan }
   | { kind: "TRecord"; fields: Array<{ name: string; nameSpan: SourceSpan; type: TypeExpr }>; span: SourceSpan };

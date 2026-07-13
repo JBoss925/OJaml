@@ -69,6 +69,27 @@ let main = Outer.Inner.value`);
   assert.equal(inner.declarations[0].name, "Outer.Inner.value");
 });
 
+test("parses module type declarations and module signature ascription", () => {
+  const ast = parse(`module type ARITH = sig
+  val add : int -> int -> int
+  val label : string
+end
+
+module Math : ARITH = struct
+  let add a b = a + b
+  let label = "math"
+end
+
+let main = Math.add 1 2`);
+  const signature = ast.declarations[0];
+  const moduleDeclaration = asModule(ast.declarations[1]);
+
+  assert.equal(signature.kind, "ModuleType");
+  assert.equal(signature.kind === "ModuleType" ? signature.name : undefined, "ARITH");
+  assert.equal(signature.kind === "ModuleType" ? signature.entries.length : undefined, 2);
+  assert.equal(moduleDeclaration.signature?.name, "ARITH");
+});
+
 test("parses sequence expressions without stealing record field separators", () => {
   const ast = parse(`let main =
   print "start";
@@ -1523,6 +1544,71 @@ let main = match A.Done with | Done -> 1`,
   }
 });
 
+test("module signatures check exported value shapes", async () => {
+  const result = await runOJaml(`module type GEOMETRY = sig
+  val origin : point
+  val move : point -> int -> int -> point
+  val describe : label -> string
+end
+
+module Geometry : GEOMETRY = struct
+  type point = { x: int; y: int }
+  type label = Origin | Named of string
+
+  let origin : point = { x = 0; y = 0 }
+  let move (point : point) dx dy = { x = point.x + dx; y = point.y + dy }
+  let describe label =
+    match label with
+    | Origin -> "origin"
+    | Named name -> name
+end
+
+let main =
+  let point = Geometry.move Geometry.origin 3 4 in
+  let label = Geometry.Named "corner" in
+  let _ = println (Geometry.describe label) in
+  point.x + point.y`);
+
+  assert.equal(result.value, 7);
+  assert.equal(result.output, "corner\n");
+});
+
+test("function type annotations constrain higher-order values", async () => {
+  const result = await runOJaml(`let apply_twice (f : int -> int) x =
+  f (f x)
+
+let main =
+  let inc : int -> int = fun x -> x + 1 in
+  apply_twice inc 40`);
+
+  assert.equal(result.value, 42);
+});
+
+test("module signatures reject missing values, wrong value types, duplicates, and unknown signatures", () => {
+  const cases = [
+    `module type NEEDS_VALUE = sig val total : int end
+module Scores : NEEDS_VALUE = struct let other = 1 end
+let main = 0`,
+    `module type NEEDS_INT = sig val total : int end
+module Scores : NEEDS_INT = struct let total = "wrong" end
+let main = 0`,
+    `module type DUP = sig val x : int end
+module type DUP = sig val y : int end
+let main = 0`,
+    `module Scores : MISSING = struct let total = 1 end
+let main = 0`,
+    `module type BAD = sig val x : missing end
+module Scores : BAD = struct let x = 1 end
+let main = 0`,
+    `module type BAD = sig val x : int val x : int end
+let main = 0`,
+  ];
+
+  for (const source of cases) {
+    assert.ok(getOJamlSyntaxMarkers(source, 8).length > 0, source);
+  }
+});
+
 test("module-local type declarations reject duplicates, unknown references, and bad constructor use", () => {
   const cases = [
     `module Geometry = struct type point = { x: int } type point = { y: int } end\nlet main = 0`,
@@ -2134,6 +2220,7 @@ const expectedExampleResults: Map<string, { mainType: string; value: number; out
   ["open-modules", { mainType: "int", value: 10, output: "words = [hello, OJaml]\nhead = hello\nnums = [1, 2]\n" }],
   ["user-modules", { mainType: "int", value: 95, output: "Scores.total 10 20 = 34\ntotal 5 6 = 15\noffset 7 = 25\nqualified 8 = 20\nlocal bonus = 1\n" }],
   ["module-types", { mainType: "int", value: 13, output: "point = { x = 3; y = 4 }\nlabel length = 6\n" }],
+  ["module-signatures", { mainType: "int", value: 11, output: "count = 11\n" }],
   ["sequencing", { mainType: "int", value: 3, output: "first\nsecond\nitems = [1, 2, 3]\n" }],
   ["pipeline", { mainType: "int", value: 12, output: "nums = [1, 2, 3]\ntotal = 12\n" }],
   ["arrays", { mainType: "int", value: 60, output: "scores = [10, 20, 30]\nlength = 3\ntotal = 60\n" }],

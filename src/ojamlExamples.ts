@@ -154,6 +154,27 @@ let main =
   point.x + point.y + label_length label`,
   },
   {
+    id: "module-signatures",
+    title: "Module Signatures",
+    source: `module type COUNTER = sig
+  val start : int
+  val step : int -> int
+  val format : int -> string
+end
+
+module Counter : COUNTER = struct
+  let start = 10
+  let step value = value + 1
+  let format value = String.concat "count = " (to_string value)
+end
+
+let main =
+  let next : int -> int = Counter.step in
+  let value = next Counter.start in
+  let _ = println (Counter.format value) in
+  value`,
+  },
+  {
     id: "sequencing",
     title: "Sequencing",
     source: `let main =

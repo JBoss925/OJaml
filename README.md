@@ -6,14 +6,14 @@ OJaml is an OCaml-inspired language implemented in TypeScript and compiled to We
 
 - Lexer and recursive-descent parser for an OCaml-like syntax.
 - Static checks for bindings, calls, branches, pattern matches, and standard-library usage.
-- Top-level and nested modules with qualified access, module-local type declarations, and `open` support.
+- Top-level and nested modules with qualified access, module-local type declarations, value signatures, and `open` support.
 - Polymorphic type inference for functions and collection builtins.
 - First-class functions and closures with captured locals and generated indirect-call types for every arity used by the program.
 - WebAssembly text backend using a uniform `i32` value representation plus concrete int/float specializations for polymorphic functions.
 - Browser editor/playground with Monaco completions, diagnostics, and hover metadata.
 - Node CLI for local compile/run workflows.
 - Reusable package exports for the editor component, examples, compiler, and runtime helpers.
-- Test suite covering parser, checker, runtime, stdlib, modules, sequencing, pipelines, closures, high-arity calls, tuples, records, algebraic data types, sets, maps, structural patterns, power, runtime access checks, exact editor-example transcripts, and compiler specialization regressions.
+- Test suite covering parser, checker, runtime, stdlib, modules, signatures, sequencing, pipelines, closures, high-arity calls, tuples, records, algebraic data types, sets, maps, structural patterns, power, runtime access checks, exact editor-example transcripts, and compiler specialization regressions.
 
 ## Language Snapshot
 
@@ -33,11 +33,12 @@ Supported language features:
 
 - `let` and `let rec` top-level bindings
 - Top-level and nested modules with `module Name = struct ... end`
+- Module type declarations with `val` signatures and module ascription with `module Name : SIGNATURE = struct ... end`
 - Top-level `open` declarations for built-in standard-library namespaces and user-defined modules
 - Local `let ... in ...`, local function bindings, and local `let rec` function bindings
 - Anonymous functions and first-class function values, including high-arity function values and staged closures that return more high-arity functions
 - Integers, floats, booleans, strings, unit, tuples, structural records, and algebraic data types
-- Record and algebraic data type declarations, including type parameters, plus value and function parameter annotations such as `let ada : person = ...` and `let describe (person : person) = ...`
+- Record and algebraic data type declarations, including type parameters, plus value, function, and higher-order function annotations such as `let ada : person = ...`, `let describe (person : person) = ...`, and `let apply (f : int -> int) = ...`
 - Integer and float arithmetic, right-associative power `**`, comparison, equality, boolean, and integer `mod` operators
 - Sequencing with `expr; expr`; the left side must return `unit`, and the whole sequence has the right side's type
 - Forward pipelines with `value |> f`, equivalent to `f value`, including top-level functions, local closures, returned closures, and one-argument standard-library functions
@@ -99,7 +100,7 @@ Map.has : ('k, 'v) map -> 'k -> bool
 
 All standard-library functions have explicit type schemes so editor hovers, type errors, and autocomplete remain statically meaningful.
 
-Modules group related `let`, `let rec`, record type, and algebraic data type declarations under a qualified namespace. Module members can refer to sibling values, types, and constructors by short name inside the module; nested modules can refer to values and types from enclosing modules; members can be called through qualified names such as `Scores.total` or `Scores.Offsets.make`; and user modules can be opened so their immediate values, types, and constructors are available by short name. User modules currently contain values, nested modules, and type declarations; module signatures and functors are not implemented yet.
+Modules group related `let`, `let rec`, record type, and algebraic data type declarations under a qualified namespace. Module members can refer to sibling values, types, and constructors by short name inside the module; nested modules can refer to values and types from enclosing modules; members can be called through qualified names such as `Scores.total` or `Scores.Offsets.make`; and user modules can be opened so their immediate values, types, and constructors are available by short name. Module type declarations can require exported values with `val` signatures, and `module Scores : SCORE_API = struct ... end` checks that the implementation provides each promised value at the declared type. User modules currently contain values, nested modules, and type declarations; full signature type items and functors are not implemented yet.
 
 ```ocaml
 module Scores = struct
@@ -138,6 +139,8 @@ Local and top-level bindings still shadow opened value names, and ambiguous shor
 Tuple projection uses zero-based postfix indexes: `point.0`, `point.1`, and so on. The checker verifies the receiver is a tuple and rejects indexes outside the tuple arity before emission. `fst` and `snd` remain available as pair-specific helpers.
 
 Record type declarations use `type person = { name: string; year: int }`. Algebraic data type declarations use forms such as `type status = Pending | Done of int | Failed of string`, and polymorphic declarations use type parameters such as `type 'a option = None | Some of 'a` or `type ('ok, 'err) result = Ok of 'ok | Error of 'err`. Annotated values such as `let ada : person = { name = "Ada"; year = 1815 }`, `let value : int option = Some 42`, and annotated function parameters such as `let describe (person : person) = person.name` are checked against the named type, then lower to the same runtime layouts as unannotated values. Type annotations support primitives, named record/variant types, tuples, inline records, and postfix forms such as `int list`, `person array`, `string set`, `int option`, and `(string, int) map`. Record field layout is sorted by label at compile time, so source field order does not affect access, matching, or formatting.
+
+Function type annotations use arrow syntax such as `int -> int`, `int -> int -> int`, or `(int -> int) -> int`. OJaml functions accept their declared parameters in one application rather than implicit currying, so `int -> int -> int` describes a two-argument function returning an `int`.
 
 Pattern matching supports primitive literals, unit, wildcard/variable catch-alls, tuple structure, record structure, list structure with `[]` and `head :: tail`, fixed-length array structure with `[| ... |]`, set structure with `{| item; item |}`, map structure with `{| key: value; key: value |}`, and constructors such as `Done value`. Empty maps use `{| : |}` so they stay distinct from empty sets. Tuple, record, list, array, set, map, and constructor patterns may bind nested values and mix literals with binders. Array, set, and map patterns match exact stored lengths. List empty/cons coverage, complete constructor coverage, and catch-all patterns remain the conservative route for exhaustive matches.
 
@@ -233,7 +236,7 @@ import "ojaml/styles.css";
 
 ## Runtime Model
 
-The WebAssembly backend uses a uniform `i32` representation. Integers and booleans are immediate values; unit is zero; heap-backed values such as floats, strings, tuples, records, arrays, lists, sets, maps, and closures are represented as pointers. Tuple and record blocks store their element count followed by one `i32` slot per element or field; tuple projection and pair helpers lower to fixed slot loads after type checking, and record field labels are kept in the static type descriptor used by field access and `to_string`. Modules are erased before WebAssembly emission: values become qualified global function/value names, type declarations feed the checker and constructor table, and module namespaces are not runtime records. Closure values store a table index plus captured values; indirect calls generate the WebAssembly function type needed for each arity used by the program instead of imposing a fixed source-level argument ceiling. The same path handles direct calls, first-class function values, returned closures, and staged closures that accept more arguments later. Float arithmetic and power unbox operands to `f64`; `int ** int` returns an int, while any float operand makes `**` return a boxed float. Polymorphic top-level functions receive concrete int/float specializations when call sites require different runtime representations. The checker is responsible for rejecting invalid programs before emission.
+The WebAssembly backend uses a uniform `i32` representation. Integers and booleans are immediate values; unit is zero; heap-backed values such as floats, strings, tuples, records, arrays, lists, sets, maps, and closures are represented as pointers. Tuple and record blocks store their element count followed by one `i32` slot per element or field; tuple projection and pair helpers lower to fixed slot loads after type checking, and record field labels are kept in the static type descriptor used by field access and `to_string`. Modules are erased before WebAssembly emission: values become qualified global function/value names, type declarations and value signatures feed the checker, constructors feed the constructor table, and module namespaces are not runtime records. Closure values store a table index plus captured values; indirect calls generate the WebAssembly function type needed for each arity used by the program instead of imposing a fixed source-level argument ceiling. The same path handles direct calls, first-class function values, returned closures, and staged closures that accept more arguments later. Float arithmetic and power unbox operands to `f64`; `int ** int` returns an int, while any float operand makes `**` return a boxed float. Polymorphic top-level functions receive concrete int/float specializations when call sites require different runtime representations. The checker is responsible for rejecting invalid programs before emission.
 
 Runtime collection helpers trap invalid access: negative array lengths, out-of-bounds array reads/writes, empty-list head/tail, and missing `Map.get` keys do not silently read arbitrary memory. Current runtime limits are still intentional: allocation is bump-pointer based, there is no garbage collector, and traps are not yet recoverable language-level exceptions.
 

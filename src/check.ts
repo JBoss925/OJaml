@@ -1,4 +1,4 @@
-import type { Declaration, Expr, ModuleDeclaration, OpenDeclaration, Pattern, Program, SourceSpan, TypeDeclaration, TypeExpr } from "./ast";
+import type { Declaration, Expr, ModuleDeclaration, ModuleSignatureEntry, ModuleTypeDeclaration, OpenDeclaration, Pattern, Program, SourceSpan, TypeDeclaration, TypeExpr } from "./ast";
 import { OJamlError } from "./errors";
 
 export type OJamlType = "int" | "float" | "bool" | "string" | "unit" | "tuple" | "record" | "array" | "list" | "set" | "map" | "fn";
@@ -78,6 +78,11 @@ type ConstructorBinding = {
   tag: number;
 };
 
+type ModuleSignature = {
+  declaration: ModuleTypeDeclaration;
+  entries: ModuleSignatureEntry[];
+};
+
 type TypeBinding =
   | { kind: "primitive"; type: Type }
   | { kind: "declared"; declaration: TypeDeclaration };
@@ -101,6 +106,7 @@ export function check(program: Program): CheckResult {
   const letDeclarations = collectLetDeclarations(program);
   const moduleDeclarations = collectModuleDeclarations(program);
   ensureUniqueModules(moduleDeclarations);
+  const moduleSignatures = collectModuleSignatures(program);
   const openAliases = collectOpenAliases(program.declarations.filter((declaration): declaration is OpenDeclaration => declaration.kind === "Open"), moduleDeclarations);
   const typeEnv = collectTypeDeclarations(typeDeclarations);
   const constructors = collectConstructors(typeDeclarations, typeEnv);
@@ -123,6 +129,7 @@ export function check(program: Program): CheckResult {
   if (prune(main.type).kind === "fn") throw new OJamlError("Program 'main' must not take arguments", 0, 0);
 
   for (const declaration of letDeclarations) checkDeclaration(declaration, globals, context);
+  checkModuleSignatureAscriptions(moduleDeclarations, moduleSignatures, globals, context);
 
   const mainType = prune(globals.get("main")!.type);
   if (!isRuntimeMainType(mainType)) {
@@ -216,6 +223,18 @@ function collectModuleDeclarations(program: Program): ModuleDeclaration[] {
   return program.declarations.flatMap((declaration) => declaration.kind === "Module" ? collectModules(declaration) : []);
 }
 
+function collectModuleSignatures(program: Program): Map<string, ModuleSignature> {
+  const signatures = new Map<string, ModuleSignature>();
+  for (const declaration of program.declarations) {
+    if (declaration.kind !== "ModuleType") continue;
+    if (signatures.has(declaration.name)) {
+      throw new OJamlError(`Duplicate module type '${declaration.name}'`, declaration.nameSpan.start, declaration.nameSpan.end);
+    }
+    signatures.set(declaration.name, { declaration, entries: declaration.entries });
+  }
+  return signatures;
+}
+
 function collectModules(declaration: ModuleDeclaration): ModuleDeclaration[] {
   return [
     declaration,
@@ -249,6 +268,32 @@ function ensureUniqueModules(modules: ModuleDeclaration[]): void {
       throw new OJamlError(`Duplicate module '${moduleDeclaration.name}'`, moduleDeclaration.nameSpan.start, moduleDeclaration.nameSpan.end);
     }
     seen.add(moduleDeclaration.name);
+  }
+}
+
+function checkModuleSignatureAscriptions(
+  modules: ModuleDeclaration[],
+  signatures: Map<string, ModuleSignature>,
+  globals: Map<string, Binding>,
+  context: CheckContext,
+): void {
+  for (const moduleDeclaration of modules) {
+    if (!moduleDeclaration.signature) continue;
+    const signature = signatures.get(moduleDeclaration.signature.name);
+    if (!signature) {
+      throw new OJamlError(`Unknown module type '${moduleDeclaration.signature.name}'`, moduleDeclaration.signature.span.start, moduleDeclaration.signature.span.end);
+    }
+    const localTypeAliases = moduleTypeAliases(moduleDeclaration.name, context.types);
+    for (const entry of signature.entries) {
+      if (entry.kind !== "Val") continue;
+      const memberName = `${moduleDeclaration.name}.${entry.name}`;
+      const binding = globals.get(memberName);
+      if (!binding) {
+        throw new OJamlError(`Module '${moduleDeclaration.name}' does not provide value '${entry.name}' required by '${signature.declaration.name}'`, entry.nameSpan.start, entry.nameSpan.end);
+      }
+      const expected = resolveTypeExpr(entry.type, context.types, new Map(), localTypeAliases, context.openTypeAliases);
+      unify(binding.type, expected, entry.type.span);
+    }
   }
 }
 
@@ -326,6 +371,9 @@ function resolveTypeExpr(typeExpr: TypeExpr, types: TypeEnvironment, typeVars = 
   if (typeExpr.kind === "TName") {
     return resolveNamedType(resolveTypeName(typeExpr.name, typeExpr.span, aliases, openAliases), [], types, typeExpr.span, typeVars, openAliases);
   }
+  if (typeExpr.kind === "TFn") {
+    return fn(typeExpr.params.map((param) => resolveTypeExpr(param, types, typeVars, aliases, openAliases)), resolveTypeExpr(typeExpr.result, types, typeVars, aliases, openAliases));
+  }
   if (typeExpr.kind === "TTuple") return app("tuple", typeExpr.items.map((item) => resolveTypeExpr(item, types, typeVars, aliases, openAliases)));
   if (typeExpr.kind === "TApp") {
     if (typeExpr.name === "map") {
@@ -367,9 +415,8 @@ function resolveNamedType(name: string, args: Type[], types: TypeEnvironment, sp
 
 function moduleTypeAliases(name: string, types: TypeEnvironment): Map<string, string> {
   const parts = name.split(".");
-  if (parts.length < 2) return new Map();
   const aliases = new Map<string, string>();
-  for (let i = 1; i < parts.length; i++) {
+  for (let i = 1; i <= Math.max(1, parts.length - 1); i++) {
     const prefix = `${parts.slice(0, i).join(".")}.`;
     for (const key of types.keys()) {
       if (!key.startsWith(prefix)) continue;
