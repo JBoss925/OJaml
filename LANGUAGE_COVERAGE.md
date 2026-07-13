@@ -17,7 +17,7 @@ This matrix tracks features currently implemented by the parser, checker, WASM b
 | String escapes | yes | test suite |
 | Integer and float arithmetic, power, comparison, short-circuit boolean, unary operators | yes | Language Tour, Boolean Logic |
 | Sequencing with `expr; expr` and unit-checking for the left side | yes | Sequencing |
-| Forward pipeline operator <code>&#124;&gt;</code> | yes | Pipeline |
+| Forward pipeline operator | yes | Pipeline |
 | Polymorphic functions and int/float specialization | yes | Type Inference |
 | Function application | yes | all nontrivial examples |
 | First-class functions, including high-arity function values and staged closures | yes | Higher Order, High-Arity Functions |
@@ -33,9 +33,9 @@ This matrix tracks features currently implemented by the parser, checker, WASM b
 | `Float.of_int` and `Float.to_int` | yes | test suite |
 | `String.concat/length/split` | yes | test suite |
 | Polymorphic arrays | yes | Collections, Language Tour |
-| `Array.make/get/set/length/map/filter/iter/fold_left` | yes | Arrays, Language Tour |
+| `Array.make/get/set/length/append/map/filter/iter/fold_left` | yes | Arrays, Language Tour |
 | Polymorphic lists | yes | Collections, Higher Order |
-| `List.empty/cons/head/tail/is_empty/length/map/filter/iter/fold_left` | yes | Lists, Higher Order |
+| `List.empty/cons/head/tail/is_empty/length/append/map/filter/iter/fold_left` | yes | Lists, Higher Order |
 | Polymorphic sets | yes | Sets |
 | `Set.empty/add/has/length` | yes | Sets |
 | Polymorphic maps | yes | Collections, Language Tour |

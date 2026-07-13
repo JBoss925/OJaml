@@ -1304,6 +1304,10 @@ function inferCallShape(expr: Extract<Expr, { kind: "Call" }>, types: Map<string
   if (name === "String.length") return intShape;
   if (name === "String.split") return { kind: "list", elem: stringShape };
   if (name === "Array.make") return { kind: "array", elem: inferSimpleType(expr.args[1], types, openAliases) };
+  if (name === "Array.append") {
+    const array = inferSimpleType(expr.args[0], types, openAliases);
+    return array.kind === "array" ? array : { kind: "array", elem: unknownShape };
+  }
   if (name === "Array.map") {
     const mapped = inferFunctionResultShape(inferSimpleType(expr.args[0], types, openAliases));
     return { kind: "array", elem: mapped };
@@ -1321,6 +1325,10 @@ function inferCallShape(expr: Extract<Expr, { kind: "Call" }>, types: Map<string
   if (name === "Array.fold_left") return inferSimpleType(expr.args[1], types, openAliases);
   if (name === "List.empty") return { kind: "list", elem: unknownShape };
   if (name === "List.cons") return { kind: "list", elem: inferSimpleType(expr.args[0], types, openAliases) };
+  if (name === "List.append") {
+    const list = inferSimpleType(expr.args[0], types, openAliases);
+    return list.kind === "list" ? list : { kind: "list", elem: unknownShape };
+  }
   if (name === "List.map") {
     const mapped = inferFunctionResultShape(inferSimpleType(expr.args[0], types, openAliases));
     return { kind: "list", elem: mapped };
@@ -1580,6 +1588,7 @@ function builtinArities(): Array<[string, number]> {
     ["Array.length", 1],
     ["Array.get", 2],
     ["Array.set", 3],
+    ["Array.append", 2],
     ["Array.map", 2],
     ["Array.filter", 2],
     ["Array.iter", 2],
@@ -1590,6 +1599,7 @@ function builtinArities(): Array<[string, number]> {
     ["List.tail", 1],
     ["List.is_empty", 1],
     ["List.length", 1],
+    ["List.append", 2],
     ["List.map", 2],
     ["List.filter", 2],
     ["List.iter", 2],
@@ -1615,11 +1625,9 @@ function builtinReturnShape(name: string): ValueShape {
   if (name === "String.length") return intShape;
   if (name === "String.split") return { kind: "list", elem: stringShape };
   if (name === "Array.make") return { kind: "array", elem: unknownShape };
-  if (name === "Array.map") return { kind: "array", elem: unknownShape };
-  if (name === "Array.filter") return { kind: "array", elem: unknownShape };
+  if (name === "Array.append" || name === "Array.map" || name === "Array.filter") return { kind: "array", elem: unknownShape };
   if (name === "List.empty" || name === "List.cons" || name === "List.tail") return { kind: "list", elem: unknownShape };
-  if (name === "List.map") return { kind: "list", elem: unknownShape };
-  if (name === "List.filter") return { kind: "list", elem: unknownShape };
+  if (name === "List.append" || name === "List.map" || name === "List.filter") return { kind: "list", elem: unknownShape };
   if (name === "List.iter") return unitShape;
   if (name === "Set.empty" || name === "Set.add") return { kind: "set", elem: unknownShape };
   if (name === "Map.empty" || name === "Map.set") return { kind: "map", key: unknownShape, value: unknownShape };
@@ -1747,6 +1755,42 @@ function emitStdlibWat(): string {
             (i32.load (local.get $f)))))
         (local.set $i (i32.add (local.get $i) (i32.const 1)))
         (br $loop)
+      )
+    )
+  )
+  (local.get $result)
+)
+
+(func $Array_append (param $left i32) (param $right i32) (result i32)
+  (local $left_length i32)
+  (local $right_length i32)
+  (local $result i32)
+  (local $i i32)
+  (local.set $left_length (call $Array_length (local.get $left)))
+  (local.set $right_length (call $Array_length (local.get $right)))
+  (local.set $result (call $Array_make (i32.add (local.get $left_length) (local.get $right_length)) (i32.const 0)))
+  (loop $copy_left
+    (if (i32.lt_s (local.get $i) (local.get $left_length))
+      (then
+        (drop (call $Array_set
+          (local.get $result)
+          (local.get $i)
+          (call $Array_get (local.get $left) (local.get $i))))
+        (local.set $i (i32.add (local.get $i) (i32.const 1)))
+        (br $copy_left)
+      )
+    )
+  )
+  (local.set $i (i32.const 0))
+  (loop $copy_right
+    (if (i32.lt_s (local.get $i) (local.get $right_length))
+      (then
+        (drop (call $Array_set
+          (local.get $result)
+          (i32.add (local.get $left_length) (local.get $i))
+          (call $Array_get (local.get $right) (local.get $i))))
+        (local.set $i (i32.add (local.get $i) (i32.const 1)))
+        (br $copy_right)
       )
     )
   )
@@ -1882,6 +1926,15 @@ function emitStdlibWat(): string {
           (i32.load (local.get $f)))
         (call $List_map (local.get $f) (call $List_tail (local.get $list)))))
   )
+)
+
+(func $List_append (param $left i32) (param $right i32) (result i32)
+  (if (result i32) (i32.eqz (local.get $left))
+    (then (local.get $right))
+    (else
+      (call $List_cons
+        (call $List_head (local.get $left))
+        (call $List_append (call $List_tail (local.get $left)) (local.get $right)))))
 )
 
 (func $List_filter (param $f i32) (param $list i32) (result i32)

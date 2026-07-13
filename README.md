@@ -73,6 +73,7 @@ Array.make : int -> 'a -> 'a array
 Array.length : 'a array -> int
 Array.get : 'a array -> int -> 'a
 Array.set : 'a array -> int -> 'a -> unit
+Array.append : 'a array -> 'a array -> 'a array
 Array.map : ('a -> 'b) -> 'a array -> 'b array
 Array.filter : ('a -> bool) -> 'a array -> 'a array
 Array.iter : ('a -> unit) -> 'a array -> unit
@@ -84,6 +85,7 @@ List.head : 'a list -> 'a
 List.tail : 'a list -> 'a list
 List.is_empty : 'a list -> bool
 List.length : 'a list -> int
+List.append : 'a list -> 'a list -> 'a list
 List.map : ('a -> 'b) -> 'a list -> 'b list
 List.filter : ('a -> bool) -> 'a list -> 'a list
 List.iter : ('a -> unit) -> 'a list -> unit
