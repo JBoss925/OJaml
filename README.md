@@ -33,7 +33,7 @@ Supported language features:
 
 - `let` and `let rec` top-level bindings
 - Top-level and nested modules with `module Name = struct ... end`
-- Top-level `open` declarations for built-in standard-library namespaces and user-defined value modules
+- Top-level `open` declarations for built-in standard-library namespaces and user-defined modules
 - Local `let ... in ...`, local function bindings, and local `let rec` function bindings
 - Anonymous functions and first-class function values, including high-arity function values and staged closures that return more high-arity functions
 - Integers, floats, booleans, strings, unit, tuples, structural records, and algebraic data types
@@ -99,7 +99,7 @@ Map.has : ('k, 'v) map -> 'k -> bool
 
 All standard-library functions have explicit type schemes so editor hovers, type errors, and autocomplete remain statically meaningful.
 
-Modules group related `let`, `let rec`, record type, and algebraic data type declarations under a qualified namespace. Module members can refer to sibling values, types, and constructors by short name inside the module; nested modules can refer to values and types from enclosing modules; members can be called through qualified names such as `Scores.total` or `Scores.Offsets.make`; and any user module can be exposed by `open Scores` or `open Scores.Offsets`. User modules currently contain values, nested modules, and type declarations; module signatures and functors are not implemented yet.
+Modules group related `let`, `let rec`, record type, and algebraic data type declarations under a qualified namespace. Module members can refer to sibling values, types, and constructors by short name inside the module; nested modules can refer to values and types from enclosing modules; members can be called through qualified names such as `Scores.total` or `Scores.Offsets.make`; and user modules can be opened so their immediate values, types, and constructors are available by short name. User modules currently contain values, nested modules, and type declarations; module signatures and functors are not implemented yet.
 
 ```ocaml
 module Scores = struct
@@ -120,7 +120,7 @@ let main =
   Scores.total { first = 10; second = 20 } + total { first = 5; second = 6 } + make 3 7
 ```
 
-Top-level `open` declarations expose members of built-in or user-defined namespaces by short name:
+Top-level `open` declarations expose members of built-in or user-defined namespaces by short name. Built-in modules expose values; user modules expose immediate values, type names, and variant constructors:
 
 ```ocaml
 open List
@@ -131,7 +131,7 @@ let main =
   List.length words
 ```
 
-Local and top-level bindings still shadow opened names, and ambiguous short names from multiple opened namespaces are rejected. Use the qualified form, such as `String.length`, `List.length`, or `Scores.total`, when two opened namespaces export the same member.
+Local and top-level bindings still shadow opened value names, and ambiguous short names from multiple opened namespaces are rejected for values, types, and constructors. Use the qualified form, such as `String.length`, `List.length`, `Scores.total`, `Geometry.point`, or `Geometry.Named`, when two opened namespaces export the same member.
 
 `print` appends text directly to the captured output stream; `println` appends a trailing newline. `to_string` formats primitives, tuples, records, arrays, lists, sets, maps, and functions. Unknown heap-backed values fall back to `Object <ptr>`, and function values format as `Function <ptr>`.
 

@@ -144,12 +144,14 @@ let main =
     | Named name -> String.length name
 end
 
+open Geometry
+
 let main =
-  let point : Geometry.point = Geometry.move Geometry.origin 3 4 in
-  let label = Geometry.Named "corner" in
+  let point : point = move origin 3 4 in
+  let label : label = Named "corner" in
   let _ = println (String.concat "point = " (to_string point)) in
-  let _ = println (String.concat "label length = " (to_string (Geometry.label_length label))) in
-  point.x + point.y + Geometry.label_length label`,
+  let _ = println (String.concat "label length = " (to_string (label_length label))) in
+  point.x + point.y + label_length label`,
   },
   {
     id: "sequencing",

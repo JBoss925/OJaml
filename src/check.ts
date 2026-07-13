@@ -63,6 +63,8 @@ type CheckContext = {
   types: TypeEnvironment;
   constructors: Map<string, ConstructorBinding>;
   openAliases: Map<string, string>;
+  openTypeAliases: Map<string, string>;
+  openConstructorAliases: Map<string, string>;
   scopedAliases: Map<string, string>;
   scopedTypeAliases: Map<string, string>;
   scopedConstructorAliases: Map<string, string>;
@@ -102,16 +104,18 @@ export function check(program: Program): CheckResult {
   const openAliases = collectOpenAliases(program.declarations.filter((declaration): declaration is OpenDeclaration => declaration.kind === "Open"), moduleDeclarations);
   const typeEnv = collectTypeDeclarations(typeDeclarations);
   const constructors = collectConstructors(typeDeclarations, typeEnv);
+  const openTypeAliases = collectOpenTypeAliases(program.declarations.filter((declaration): declaration is OpenDeclaration => declaration.kind === "Open"), moduleDeclarations, typeEnv);
+  const openConstructorAliases = collectOpenConstructorAliases(program.declarations.filter((declaration): declaration is OpenDeclaration => declaration.kind === "Open"), moduleDeclarations, constructors);
   for (const constructor of constructors.values()) {
     if (globals.has(constructor.name)) throw new OJamlError(`Duplicate constructor '${constructor.name}'`, 0, 0);
     const instance = instantiateConstructor(constructor);
     globals.set(constructor.name, { type: instance.payload ? fn([instance.payload], instance.type) : instance.type });
   }
-  const context: CheckContext = { tokens: [], types: typeEnv, constructors, openAliases, scopedAliases: new Map(), scopedTypeAliases: new Map(), scopedConstructorAliases: new Map() };
+  const context: CheckContext = { tokens: [], types: typeEnv, constructors, openAliases, openTypeAliases, openConstructorAliases, scopedAliases: new Map(), scopedTypeAliases: new Map(), scopedConstructorAliases: new Map() };
 
   for (const declaration of letDeclarations) {
     if (globals.has(declaration.name)) throw new OJamlError(`Duplicate binding '${declaration.name}'`, declaration.span.start, declaration.span.end);
-    globals.set(declaration.name, { type: makeDeclarationStub(declaration, typeEnv) });
+    globals.set(declaration.name, { type: makeDeclarationStub(declaration, typeEnv, openTypeAliases) });
   }
 
   const main = globals.get("main");
@@ -148,6 +152,44 @@ function collectOpenAliases(declarations: OpenDeclaration[], modules: ModuleDecl
       const alias = member.name.slice(declaration.module.length + 1);
       if (aliases.has(alias) && aliases.get(alias) !== member.name) ambiguous.add(alias);
       else if (!ambiguous.has(alias)) aliases.set(alias, member.name);
+    }
+  }
+  for (const alias of ambiguous) aliases.set(alias, "");
+  return aliases;
+}
+
+function collectOpenTypeAliases(declarations: OpenDeclaration[], modules: ModuleDeclaration[], types: TypeEnvironment): Map<string, string> {
+  const aliases = new Map<string, string>();
+  const ambiguous = new Set<string>();
+  const moduleNames = new Set(modules.map((moduleDeclaration) => moduleDeclaration.name));
+  for (const declaration of declarations) {
+    if (!moduleNames.has(declaration.module)) continue;
+    const prefix = `${declaration.module}.`;
+    for (const name of types.keys()) {
+      if (!name.startsWith(prefix)) continue;
+      const alias = name.slice(prefix.length);
+      if (alias.includes(".")) continue;
+      if (aliases.has(alias) && aliases.get(alias) !== name) ambiguous.add(alias);
+      else if (!ambiguous.has(alias)) aliases.set(alias, name);
+    }
+  }
+  for (const alias of ambiguous) aliases.set(alias, "");
+  return aliases;
+}
+
+function collectOpenConstructorAliases(declarations: OpenDeclaration[], modules: ModuleDeclaration[], constructors: Map<string, ConstructorBinding>): Map<string, string> {
+  const aliases = new Map<string, string>();
+  const ambiguous = new Set<string>();
+  const moduleNames = new Set(modules.map((moduleDeclaration) => moduleDeclaration.name));
+  for (const declaration of declarations) {
+    if (!moduleNames.has(declaration.module)) continue;
+    const prefix = `${declaration.module}.`;
+    for (const name of constructors.keys()) {
+      if (!name.startsWith(prefix)) continue;
+      const alias = name.slice(prefix.length);
+      if (alias.includes(".")) continue;
+      if (aliases.has(alias) && aliases.get(alias) !== name) ambiguous.add(alias);
+      else if (!ambiguous.has(alias)) aliases.set(alias, name);
     }
   }
   for (const alias of ambiguous) aliases.set(alias, "");
@@ -216,6 +258,18 @@ function resolveOpenAlias(name: string, aliases: Map<string, string>, span: Sour
   return resolved;
 }
 
+function resolveOpenTypeAlias(name: string, aliases: Map<string, string>, span: SourceSpan): string | undefined {
+  const resolved = aliases.get(name);
+  if (resolved === "") throw new OJamlError(`Ambiguous open type '${name}'`, span.start, span.end);
+  return resolved;
+}
+
+function resolveOpenConstructorAlias(name: string, aliases: Map<string, string>, span: SourceSpan): string | undefined {
+  const resolved = aliases.get(name);
+  if (resolved === "") throw new OJamlError(`Ambiguous open constructor '${name}'`, span.start, span.end);
+  return resolved;
+}
+
 function collectTypeDeclarations(declarations: TypeDeclaration[]): TypeEnvironment {
   const types = new Map<string, TypeBinding>([
     ["int", { kind: "primitive", type: intType }],
@@ -263,32 +317,36 @@ function collectConstructors(declarations: TypeDeclaration[], types: TypeEnviron
   return constructors;
 }
 
-function resolveTypeExpr(typeExpr: TypeExpr, types: TypeEnvironment, typeVars = new Map<string, Type>(), aliases = new Map<string, string>()): Type {
+function resolveTypeExpr(typeExpr: TypeExpr, types: TypeEnvironment, typeVars = new Map<string, Type>(), aliases = new Map<string, string>(), openAliases = new Map<string, string>()): Type {
   if (typeExpr.kind === "TVar") {
     const type = typeVars.get(typeExpr.name);
     if (!type) throw new OJamlError(`Unknown type parameter '${typeExpr.name}'`, typeExpr.span.start, typeExpr.span.end);
     return type;
   }
   if (typeExpr.kind === "TName") {
-    return resolveNamedType(aliases.get(typeExpr.name) ?? typeExpr.name, [], types, typeExpr.span, typeVars);
+    return resolveNamedType(resolveTypeName(typeExpr.name, typeExpr.span, aliases, openAliases), [], types, typeExpr.span, typeVars, openAliases);
   }
-  if (typeExpr.kind === "TTuple") return app("tuple", typeExpr.items.map((item) => resolveTypeExpr(item, types, typeVars, aliases)));
+  if (typeExpr.kind === "TTuple") return app("tuple", typeExpr.items.map((item) => resolveTypeExpr(item, types, typeVars, aliases, openAliases)));
   if (typeExpr.kind === "TApp") {
     if (typeExpr.name === "map") {
       if (typeExpr.args.length !== 2) throw new OJamlError("Map type expects two type arguments", typeExpr.span.start, typeExpr.span.end);
-      return app("map", [resolveTypeExpr(typeExpr.args[0], types, typeVars, aliases), resolveTypeExpr(typeExpr.args[1], types, typeVars, aliases)]);
+      return app("map", [resolveTypeExpr(typeExpr.args[0], types, typeVars, aliases, openAliases), resolveTypeExpr(typeExpr.args[1], types, typeVars, aliases, openAliases)]);
     }
-    const args = typeExpr.args.map((arg) => resolveTypeExpr(arg, types, typeVars, aliases));
+    const args = typeExpr.args.map((arg) => resolveTypeExpr(arg, types, typeVars, aliases, openAliases));
     if (typeExpr.name === "array" || typeExpr.name === "list" || typeExpr.name === "set") {
       if (args.length !== 1) throw new OJamlError(`${typeExpr.name} type expects one type argument`, typeExpr.span.start, typeExpr.span.end);
       return app(typeExpr.name, [args[0]]);
     }
-    return resolveNamedType(aliases.get(typeExpr.name) ?? typeExpr.name, args, types, typeExpr.span, typeVars);
+    return resolveNamedType(resolveTypeName(typeExpr.name, typeExpr.span, aliases, openAliases), args, types, typeExpr.span, typeVars, openAliases);
   }
-  return recordType(typeExpr.fields.map((field) => ({ name: field.name, type: resolveTypeExpr(field.type, types, typeVars, aliases) })));
+  return recordType(typeExpr.fields.map((field) => ({ name: field.name, type: resolveTypeExpr(field.type, types, typeVars, aliases, openAliases) })));
 }
 
-function resolveNamedType(name: string, args: Type[], types: TypeEnvironment, span: SourceSpan, outerTypeVars: Map<string, Type>): Type {
+function resolveTypeName(name: string, span: SourceSpan, aliases: Map<string, string>, openAliases: Map<string, string>): string {
+  return aliases.get(name) ?? resolveOpenTypeAlias(name, openAliases, span) ?? name;
+}
+
+function resolveNamedType(name: string, args: Type[], types: TypeEnvironment, span: SourceSpan, outerTypeVars: Map<string, Type>, openAliases = new Map<string, string>()): Type {
   const binding = types.get(name);
   if (!binding) throw new OJamlError(`Unknown type '${name}'`, span.start, span.end);
   if (binding.kind === "primitive") {
@@ -303,7 +361,7 @@ function resolveNamedType(name: string, args: Type[], types: TypeEnvironment, sp
   declaration.params.forEach((param, index) => scoped.set(param.name, args[index]));
   const aliases = moduleTypeAliases(declaration.name, types);
   return declaration.body.kind === "Record"
-    ? recordType(declaration.body.fields.map((field) => ({ name: field.name, type: resolveTypeExpr(field.type, types, scoped, aliases) })))
+    ? recordType(declaration.body.fields.map((field) => ({ name: field.name, type: resolveTypeExpr(field.type, types, scoped, aliases, openAliases) })))
     : variantType(declaration.name, args);
 }
 
@@ -467,11 +525,11 @@ function builtin(name: string, detail: string, createType: () => Type, documenta
   return { name, detail, documentation, createType };
 }
 
-function makeDeclarationStub(declaration: Declaration, types: TypeEnvironment): Type {
+function makeDeclarationStub(declaration: Declaration, types: TypeEnvironment, openTypeAliases = new Map<string, string>()): Type {
   const aliases = moduleTypeAliases(declaration.name, types);
   if (declaration.params.length === 0) return typeVar();
   return fn(declaration.params.map((_, index) => declaration.paramAnnotations[index]
-    ? resolveTypeExpr(declaration.paramAnnotations[index]!, types, new Map(), aliases)
+    ? resolveTypeExpr(declaration.paramAnnotations[index]!, types, new Map(), aliases, openTypeAliases)
     : typeVar()), typeVar());
 }
 
@@ -489,7 +547,7 @@ function checkDeclaration(declaration: Declaration, globals: Map<string, Binding
     declaration.params.forEach((param, index) => locals.set(param, type.params[index]));
     expectedResult = type.result;
   }
-  if (declaration.annotation) unify(expectedResult, resolveTypeExpr(declaration.annotation, context.types, new Map(), scopedTypeAliases), declaration.annotation.span);
+  if (declaration.annotation) unify(expectedResult, resolveTypeExpr(declaration.annotation, context.types, new Map(), scopedTypeAliases, context.openTypeAliases), declaration.annotation.span);
   const bodyType = checkExpr(declaration.value, globals, locals, declarationContext);
   unify(expectedResult, bodyType, declaration.value.span);
   const type = prune(binding.type);
@@ -567,7 +625,7 @@ function checkExpr(expr: Expr, globals: Map<string, Binding>, locals: Map<string
         context.tokens.push({ name: expr.name, kind: "value", type: local, span: expr.span });
         return local;
       }
-      const constructor = context.constructors.get(context.scopedConstructorAliases.get(expr.name) ?? expr.name);
+      const constructor = resolveConstructor(expr.name, expr.span, context);
       if (constructor) {
         const instance = instantiateConstructor(constructor);
         if (instance.payload) throw new OJamlError(`Constructor '${constructor.name}' expects a payload`, expr.span.start, expr.span.end);
@@ -616,7 +674,7 @@ function checkExpr(expr: Expr, globals: Map<string, Binding>, locals: Map<string
         return checkExpr(expr.body, globals, nested, context);
       }
       const valueType = checkExpr(expr.value, globals, locals, context);
-      if (expr.annotation) unify(valueType, resolveTypeExpr(expr.annotation, context.types, new Map(), context.scopedTypeAliases), expr.annotation.span);
+      if (expr.annotation) unify(valueType, resolveTypeExpr(expr.annotation, context.types, new Map(), context.scopedTypeAliases, context.openTypeAliases), expr.annotation.span);
       context.tokens.push({ name: expr.name, kind: "value", type: valueType, span: expr.nameSpan });
       const nested = new Map(locals);
       nested.set(expr.name, valueType);
@@ -624,7 +682,7 @@ function checkExpr(expr: Expr, globals: Map<string, Binding>, locals: Map<string
     }
     case "Call": {
       if (expr.callee.kind === "Var") {
-        const constructor = context.constructors.get(context.scopedConstructorAliases.get(expr.callee.name) ?? expr.callee.name);
+        const constructor = resolveConstructor(expr.callee.name, expr.callee.span, context);
         if (constructor) {
           const instance = instantiateConstructor(constructor);
           if (!instance.payload) {
@@ -689,7 +747,7 @@ function checkExpr(expr: Expr, globals: Map<string, Binding>, locals: Map<string
       const nested = new Map(locals);
       const params = expr.params.map((param, index) => {
         const paramType = expr.paramAnnotations[index]
-          ? resolveTypeExpr(expr.paramAnnotations[index]!, context.types, new Map(), context.scopedTypeAliases)
+          ? resolveTypeExpr(expr.paramAnnotations[index]!, context.types, new Map(), context.scopedTypeAliases, context.openTypeAliases)
           : typeVar();
         nested.set(param, paramType);
         return paramType;
@@ -728,7 +786,7 @@ function isStructurallyExhaustiveMatch(patterns: Pattern[], scrutineeType: Type,
     const constructors = [...context.constructors.values()].filter((constructor) => constructor.typeName === pruned.name);
     return constructors.length > 0 && constructors.every((constructor) => patterns.some((pattern) =>
       pattern.kind === "PConstructor"
-      && (context.scopedConstructorAliases.get(pattern.name) ?? pattern.name) === constructor.name
+      && resolveConstructorName(pattern.name, pattern.nameSpan, context) === constructor.name
       && (!constructor.payload || (pattern.payload ? isPatternCatchAllLike(pattern.payload) : false))));
   }
   return false;
@@ -757,6 +815,14 @@ function resolveGlobalName(name: string, globals: Map<string, Binding>, context:
   if (context.scopedAliases.has(name)) return context.scopedAliases.get(name)!;
   if (globals.has(name)) return name;
   return resolveOpenAlias(name, context.openAliases, span) ?? name;
+}
+
+function resolveConstructorName(name: string, span: SourceSpan, context: CheckContext): string {
+  return context.scopedConstructorAliases.get(name) ?? resolveOpenConstructorAlias(name, context.openConstructorAliases, span) ?? name;
+}
+
+function resolveConstructor(name: string, span: SourceSpan, context: CheckContext): ConstructorBinding | undefined {
+  return context.constructors.get(resolveConstructorName(name, span, context));
 }
 
 function moduleMemberAliases(name: string, globals: Map<string, Binding>): Map<string, string> {
@@ -933,7 +999,7 @@ function checkPattern(pattern: Pattern, scrutinee: Type, locals: Map<string, Typ
       return false;
     }
     case "PConstructor": {
-      const constructor = context.constructors.get(context.scopedConstructorAliases.get(pattern.name) ?? pattern.name);
+      const constructor = resolveConstructor(pattern.name, pattern.nameSpan, context);
       if (!constructor) {
         throw new OJamlError(`Unknown constructor '${pattern.name}'`, pattern.nameSpan.start, pattern.nameSpan.end);
       }
@@ -1152,6 +1218,10 @@ function collectCheckedSymbols(program: Program, globals: Map<string, Binding>, 
   const typeDeclarations = collectTypeDeclarationsFromProgram(program);
   const types = collectTypeDeclarations(typeDeclarations);
   const constructors = collectConstructors(typeDeclarations, types);
+  const moduleDeclarations = collectModuleDeclarations(program);
+  const openDeclarations = program.declarations.filter((declaration): declaration is OpenDeclaration => declaration.kind === "Open");
+  const openTypeAliases = collectOpenTypeAliases(openDeclarations, moduleDeclarations, types);
+  const openConstructorAliases = collectOpenConstructorAliases(openDeclarations, moduleDeclarations, constructors);
   for (const [name, binding] of builtins()) {
     symbols.push({
       name,
@@ -1180,13 +1250,21 @@ function collectCheckedSymbols(program: Program, globals: Map<string, Binding>, 
         detail: type.kind === "fn" ? `${param} : ${showType(type.params[index])}` : `${param} : unknown`,
         span: declaration.paramSpans[index],
       })),
-      locals: collectLocalSymbols(declaration, globals, types, constructors, openAliases),
+      locals: collectLocalSymbols(declaration, globals, types, constructors, openAliases, openTypeAliases, openConstructorAliases),
     });
   }
   return symbols;
 }
 
-function collectLocalSymbols(declaration: Declaration, globals: Map<string, Binding>, types: TypeEnvironment, constructors: Map<string, ConstructorBinding>, openAliases = new Map<string, string>()): Array<{ name: string; detail: string; span: SourceSpan }> {
+function collectLocalSymbols(
+  declaration: Declaration,
+  globals: Map<string, Binding>,
+  types: TypeEnvironment,
+  constructors: Map<string, ConstructorBinding>,
+  openAliases = new Map<string, string>(),
+  openTypeAliases = new Map<string, string>(),
+  openConstructorAliases = new Map<string, string>(),
+): Array<{ name: string; detail: string; span: SourceSpan }> {
   const binding = globals.get(declaration.name);
   if (!binding) return [];
   const locals = new Map<string, Type>();
@@ -1198,7 +1276,7 @@ function collectLocalSymbols(declaration: Declaration, globals: Map<string, Bind
     declaration.params.forEach((param, index) => locals.set(param, type.params[index]));
   }
   const symbols: Array<{ name: string; detail: string; span: SourceSpan }> = [];
-  collectLocalSymbolsInExpr(declaration.value, globals, locals, symbols, types, constructors, openAliases, scopedAliases, scopedTypeAliases, scopedConstructorAliases);
+  collectLocalSymbolsInExpr(declaration.value, globals, locals, symbols, types, constructors, openAliases, openTypeAliases, openConstructorAliases, scopedAliases, scopedTypeAliases, scopedConstructorAliases);
   return symbols;
 }
 
@@ -1210,13 +1288,15 @@ function collectLocalSymbolsInExpr(
   types: TypeEnvironment,
   constructors: Map<string, ConstructorBinding>,
   openAliases = new Map<string, string>(),
+  openTypeAliases = new Map<string, string>(),
+  openConstructorAliases = new Map<string, string>(),
   scopedAliases = new Map<string, string>(),
   scopedTypeAliases = new Map<string, string>(),
   scopedConstructorAliases = new Map<string, string>(),
 ): Type | undefined {
-  const context = { tokens: [], types, constructors, openAliases, scopedAliases, scopedTypeAliases, scopedConstructorAliases };
+  const context = { tokens: [], types, constructors, openAliases, openTypeAliases, openConstructorAliases, scopedAliases, scopedTypeAliases, scopedConstructorAliases };
   const visit = (child: Expr, nextLocals = locals) =>
-    collectLocalSymbolsInExpr(child, globals, nextLocals, symbols, types, constructors, openAliases, scopedAliases, scopedTypeAliases, scopedConstructorAliases);
+    collectLocalSymbolsInExpr(child, globals, nextLocals, symbols, types, constructors, openAliases, openTypeAliases, openConstructorAliases, scopedAliases, scopedTypeAliases, scopedConstructorAliases);
   switch (expr.kind) {
     case "LetIn": {
       if (expr.recursive) {

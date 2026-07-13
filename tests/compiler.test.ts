@@ -1453,6 +1453,76 @@ let main =
   assert.equal(result.value, 15);
 });
 
+test("open declarations expose module-local types and constructors", async () => {
+  const result = await runOJaml(`module Geometry = struct
+  type point = { x: int; y: int }
+  type label = Origin | Named of string
+
+  let describe (label : label) =
+    match label with
+    | Origin -> 0
+    | Named name -> String.length name
+end
+
+open Geometry
+
+let main =
+  let point : point = { x = 3; y = 4 } in
+  let label : label = Named "corner" in
+  let _ = println (to_string point) in
+  point.x + point.y + describe label + describe Origin`);
+
+  assert.equal(result.value, 13);
+  assert.equal(result.output, "{ x = 3; y = 4 }\n");
+});
+
+test("opened module constructors work in closures and patterns", async () => {
+  const result = await runOJaml(`module Result = struct
+  type value = Ok of int | Error of string
+
+  let fold value =
+    match value with
+    | Ok number -> number
+    | Error message -> String.length message
+end
+
+open Result
+
+let main =
+  let choose ok =
+    if ok then Ok 21 else Error "oops"
+  in
+  match choose false with
+  | Error message -> String.length message + fold (choose true)
+  | Ok number -> number`);
+
+  assert.equal(result.value, 25);
+});
+
+test("opened module type and constructor names reject ambiguities", () => {
+  const cases = [
+    `module A = struct type point = { x: int } end
+module B = struct type point = { y: int } end
+open A
+open B
+let main = let p : point = { x = 0 } in p.x`,
+    `module A = struct type value = Tag of int end
+module B = struct type value = Tag of string end
+open A
+open B
+let main = Tag 1`,
+    `module A = struct type value = Done end
+module B = struct type value = Done end
+open A
+open B
+let main = match A.Done with | Done -> 1`,
+  ];
+
+  for (const source of cases) {
+    assert.ok(getOJamlSyntaxMarkers(source, 8).length > 0, source);
+  }
+});
+
 test("module-local type declarations reject duplicates, unknown references, and bad constructor use", () => {
   const cases = [
     `module Geometry = struct type point = { x: int } type point = { y: int } end\nlet main = 0`,

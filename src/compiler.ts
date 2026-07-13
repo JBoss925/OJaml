@@ -43,6 +43,7 @@ export function emitWat(program: Program, checkedSymbols: CheckedSymbol[] = [], 
   const declarations = letDeclarations(program);
   const constructors = collectConstructorInfos(program);
   const openAliases = collectOpenAliases(program);
+  const openConstructorAliases = collectOpenConstructorAliases(program, constructors);
   lambdaInfos = [];
   nextLambdaId = 0;
   nextTableIndex = 0;
@@ -69,10 +70,10 @@ export function emitWat(program: Program, checkedSymbols: CheckedSymbol[] = [], 
   }
   const emittedDeclarations = declarations.map((declaration) => {
     const checkedLocals = new Map(symbolTypes.locals.get(declaration.name));
-    return emitDeclaration(declaration, globals, globalTypes, strings, checkedLocals, tokenTypes, constructors, declaration.name, openAliases);
+    return emitDeclaration(declaration, globals, globalTypes, strings, checkedLocals, tokenTypes, constructors, declaration.name, openAliases, openConstructorAliases);
   }).join("\n\n");
-  const specializedDeclarations = emitTopLevelSpecializations(program, globals, globalTypes, strings, tokenTypes, constructors, openAliases);
-  const lambdas = emitPendingLambdas(globals, globalTypes, strings, tokenTypes, constructors, openAliases);
+  const specializedDeclarations = emitTopLevelSpecializations(program, globals, globalTypes, strings, tokenTypes, constructors, openAliases, openConstructorAliases);
+  const lambdas = emitPendingLambdas(globals, globalTypes, strings, tokenTypes, constructors, openAliases, openConstructorAliases);
   const dataSegments = strings.emitDataSegments();
   const tableEntries = [
     ...topLevelWrapperNames.map((name) => `$__closure_${safe(name)}`),
@@ -116,6 +117,7 @@ function emitDeclaration(
   constructors = new Map<string, ConstructorInfo>(),
   nameOverride = declaration.name,
   openAliases = new Map<string, string>(),
+  openConstructorAliases = new Map<string, string>(),
 ): string {
   const params = declaration.params.map((param) => `(param $${safe(param)} i32)`).join(" ");
   const locals = collectLocals(declaration);
@@ -131,6 +133,7 @@ function emitDeclaration(
     tokenTypes,
     constructors,
     openAliases,
+    openConstructorAliases,
     new Map(),
     moduleMemberAliases(declaration.name, globals),
     moduleConstructorAliases(declaration.name, constructors),
@@ -153,6 +156,7 @@ class EmitContext {
     readonly tokenTypes = new Map<string, ValueShape>(),
     readonly constructors = new Map<string, ConstructorInfo>(),
     readonly openAliases = new Map<string, string>(),
+    readonly openConstructorAliases = new Map<string, string>(),
     readonly captured = new Map<string, number>(),
     readonly scopedAliases = new Map<string, string>(),
     readonly scopedConstructorAliases = new Map<string, string>(),
@@ -184,7 +188,7 @@ class EmitContext {
   }
 
   resolveConstructor(name: string): string {
-    return this.scopedConstructorAliases.get(name) ?? name;
+    return this.scopedConstructorAliases.get(name) ?? this.openConstructorAliases.get(name) ?? name;
   }
 }
 
@@ -699,6 +703,7 @@ function emitPendingLambdas(
   tokenTypes = new Map<string, ValueShape>(),
   constructors = new Map<string, ConstructorInfo>(),
   openAliases = new Map<string, string>(),
+  openConstructorAliases = new Map<string, string>(),
 ): string {
   const emitted: string[] = [];
   let cursor = 0;
@@ -713,7 +718,7 @@ function emitPendingLambdas(
       .filter((name) => !lambda.params.includes(name))
       .map((name) => `  (local $${safe(name)} i32)`);
     const params = lambda.params.map((param) => `(param $${safe(param)} i32)`).join(" ");
-    const body = emitExpr(lambda.body, new EmitContext(globals, locals, localTypes, globalTypes, strings, tokenTypes, constructors, openAliases, captured, lambda.scopedAliases, lambda.scopedConstructorAliases));
+    const body = emitExpr(lambda.body, new EmitContext(globals, locals, localTypes, globalTypes, strings, tokenTypes, constructors, openAliases, openConstructorAliases, captured, lambda.scopedAliases, lambda.scopedConstructorAliases));
     emitted.push([`(func $__lambda_${lambda.id} (param $__env i32) ${params} (result i32)`, ...localLines, indent(body, 2), ")"].join("\n"));
   }
   return emitted.join("\n\n");
@@ -807,6 +812,26 @@ function collectOpenAliases(program: Program): Map<string, string> {
       const alias = member.name.slice(declaration.module.length + 1);
       if (aliases.has(alias) && aliases.get(alias) !== member.name) ambiguous.add(alias);
       else if (!ambiguous.has(alias)) aliases.set(alias, member.name);
+    }
+  }
+  for (const alias of ambiguous) aliases.delete(alias);
+  return aliases;
+}
+
+function collectOpenConstructorAliases(program: Program, constructors: Map<string, ConstructorInfo>): Map<string, string> {
+  const aliases = new Map<string, string>();
+  const ambiguous = new Set<string>();
+  const openDeclarations = program.declarations.filter((declaration): declaration is OpenDeclaration => declaration.kind === "Open");
+  const modules = moduleDeclarations(program);
+  for (const declaration of openDeclarations) {
+    if (!modules.some((moduleDeclaration) => moduleDeclaration.name === declaration.module)) continue;
+    const prefix = `${declaration.module}.`;
+    for (const name of constructors.keys()) {
+      if (!name.startsWith(prefix)) continue;
+      const alias = name.slice(prefix.length);
+      if (alias.includes(".")) continue;
+      if (aliases.has(alias) && aliases.get(alias) !== name) ambiguous.add(alias);
+      else if (!ambiguous.has(alias)) aliases.set(alias, name);
     }
   }
   for (const alias of ambiguous) aliases.delete(alias);
@@ -1127,6 +1152,7 @@ function emitTopLevelSpecializations(
   tokenTypes = new Map<string, ValueShape>(),
   constructors = new Map<string, ConstructorInfo>(),
   openAliases = new Map<string, string>(),
+  openConstructorAliases = new Map<string, string>(),
 ): string {
   const declarations = new Map(letDeclarations(program).map((declaration) => [declaration.name, declaration]));
   const emitted: string[] = [];
@@ -1136,7 +1162,7 @@ function emitTopLevelSpecializations(
     for (const [key, specializedName] of variants) {
       const shapes = key.split(",").map((shape) => shape === "float" ? floatShape : intShape);
       const checkedLocals = new Map(declaration.params.map((param, index): [string, ValueShape] => [param, shapes[index] ?? intShape]));
-      emitted.push(emitDeclaration(declaration, globals, globalTypes, strings, checkedLocals, tokenTypes, constructors, specializedName, openAliases));
+      emitted.push(emitDeclaration(declaration, globals, globalTypes, strings, checkedLocals, tokenTypes, constructors, specializedName, openAliases, openConstructorAliases));
     }
   }
   return emitted.join("\n\n");
