@@ -1308,6 +1308,10 @@ function inferCallShape(expr: Extract<Expr, { kind: "Call" }>, types: Map<string
     const mapped = inferFunctionResultShape(inferSimpleType(expr.args[0], types, openAliases));
     return { kind: "array", elem: mapped };
   }
+  if (name === "Array.filter") {
+    const array = inferSimpleType(expr.args[1], types, openAliases);
+    return array.kind === "array" ? array : { kind: "array", elem: unknownShape };
+  }
   if (name === "Array.get") {
     const array = inferSimpleType(expr.args[0], types, openAliases);
     return array.kind === "array" ? array.elem : unknownShape;
@@ -1320,6 +1324,10 @@ function inferCallShape(expr: Extract<Expr, { kind: "Call" }>, types: Map<string
   if (name === "List.map") {
     const mapped = inferFunctionResultShape(inferSimpleType(expr.args[0], types, openAliases));
     return { kind: "list", elem: mapped };
+  }
+  if (name === "List.filter") {
+    const list = inferSimpleType(expr.args[1], types, openAliases);
+    return list.kind === "list" ? list : { kind: "list", elem: unknownShape };
   }
   if (name === "List.head") {
     const list = inferSimpleType(expr.args[0], types, openAliases);
@@ -1573,6 +1581,7 @@ function builtinArities(): Array<[string, number]> {
     ["Array.get", 2],
     ["Array.set", 3],
     ["Array.map", 2],
+    ["Array.filter", 2],
     ["Array.iter", 2],
     ["Array.fold_left", 3],
     ["List.empty", 1],
@@ -1582,6 +1591,7 @@ function builtinArities(): Array<[string, number]> {
     ["List.is_empty", 1],
     ["List.length", 1],
     ["List.map", 2],
+    ["List.filter", 2],
     ["List.iter", 2],
     ["List.fold_left", 3],
     ["Set.empty", 1],
@@ -1606,8 +1616,10 @@ function builtinReturnShape(name: string): ValueShape {
   if (name === "String.split") return { kind: "list", elem: stringShape };
   if (name === "Array.make") return { kind: "array", elem: unknownShape };
   if (name === "Array.map") return { kind: "array", elem: unknownShape };
+  if (name === "Array.filter") return { kind: "array", elem: unknownShape };
   if (name === "List.empty" || name === "List.cons" || name === "List.tail") return { kind: "list", elem: unknownShape };
   if (name === "List.map") return { kind: "list", elem: unknownShape };
+  if (name === "List.filter") return { kind: "list", elem: unknownShape };
   if (name === "List.iter") return unitShape;
   if (name === "Set.empty" || name === "Set.add") return { kind: "set", elem: unknownShape };
   if (name === "Map.empty" || name === "Map.set") return { kind: "map", key: unknownShape, value: unknownShape };
@@ -1741,6 +1753,39 @@ function emitStdlibWat(): string {
   (local.get $result)
 )
 
+(func $Array_filter (param $f i32) (param $array i32) (result i32)
+  (local $length i32)
+  (local $result i32)
+  (local $i i32)
+  (local $out i32)
+  (local $value i32)
+  (local.set $length (call $Array_length (local.get $array)))
+  (local.set $result (call $Array_make (local.get $length) (i32.const 0)))
+  (loop $loop
+    (if (i32.lt_s (local.get $i) (local.get $length))
+      (then
+        (local.set $value (call $Array_get (local.get $array) (local.get $i)))
+        (if (call_indirect (type $fn_1)
+          (local.get $f)
+          (local.get $value)
+          (i32.load (local.get $f)))
+          (then
+            (drop (call $Array_set
+              (local.get $result)
+              (local.get $out)
+              (local.get $value)))
+            (local.set $out (i32.add (local.get $out) (i32.const 1)))
+          )
+        )
+        (local.set $i (i32.add (local.get $i) (i32.const 1)))
+        (br $loop)
+      )
+    )
+  )
+  (i32.store (local.get $result) (local.get $out))
+  (local.get $result)
+)
+
 (func $Array_iter (param $f i32) (param $array i32) (result i32)
   (local $length i32)
   (local $i i32)
@@ -1836,6 +1881,25 @@ function emitStdlibWat(): string {
           (call $List_head (local.get $list))
           (i32.load (local.get $f)))
         (call $List_map (local.get $f) (call $List_tail (local.get $list)))))
+  )
+)
+
+(func $List_filter (param $f i32) (param $list i32) (result i32)
+  (if (result i32) (i32.eqz (local.get $list))
+    (then (i32.const 0))
+    (else
+      (if (result i32)
+        (call_indirect (type $fn_1)
+          (local.get $f)
+          (call $List_head (local.get $list))
+          (i32.load (local.get $f)))
+        (then
+          (call $List_cons
+            (call $List_head (local.get $list))
+            (call $List_filter (local.get $f) (call $List_tail (local.get $list)))))
+        (else
+          (call $List_filter (local.get $f) (call $List_tail (local.get $list)))))
+    )
   )
 )
 

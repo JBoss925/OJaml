@@ -224,7 +224,9 @@ let main =
     | [| first; second; third |] -> first + second + third
     | _ -> 0
   in
+  let high_scores = Array.filter (fun score -> score >= 20) scores in
   let _ = println (String.concat "scores = " (to_string scores)) in
+  let _ = println (String.concat "high_scores = " (to_string high_scores)) in
   let _ = println (String.concat "length = " (to_string (Array.length scores))) in
   let _ = println (String.concat "total = " (to_string total)) in
   total`,
@@ -247,7 +249,9 @@ let main =
     | head :: _ -> head
     | [] -> "none"
   in
+  let long_items = List.filter (fun item -> String.length item > 5) items in
   let _ = println (String.concat "items = " (to_string items)) in
+  let _ = println (String.concat "long_items = " (to_string long_items)) in
   let _ = println (String.concat "first = " first) in
   let _ = println (String.concat "rest = " (to_string rest)) in
   let _ = println (String.concat "length = " (to_string (List.length items))) in

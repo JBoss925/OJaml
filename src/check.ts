@@ -597,6 +597,10 @@ const stdlibSignatures: BuiltinSignature[] = [
     const b = typeVar();
     return fn([fn([a], b), app("array", [a])], app("array", [b]));
   }),
+  builtin("Array.filter", "Array.filter : ('a -> bool) -> 'a array -> 'a array", () => {
+    const a = typeVar();
+    return fn([fn([a], boolType), app("array", [a])], app("array", [a]));
+  }),
   builtin("Array.iter", "Array.iter : ('a -> unit) -> 'a array -> unit", () => {
     const a = typeVar();
     return fn([fn([a], unitType), app("array", [a])], unitType);
@@ -625,6 +629,10 @@ const stdlibSignatures: BuiltinSignature[] = [
     const a = typeVar();
     const b = typeVar();
     return fn([fn([a], b), app("list", [a])], app("list", [b]));
+  }),
+  builtin("List.filter", "List.filter : ('a -> bool) -> 'a list -> 'a list", () => {
+    const a = typeVar();
+    return fn([fn([a], boolType), app("list", [a])], app("list", [a]));
   }),
   builtin("List.iter", "List.iter : ('a -> unit) -> 'a list -> unit", () => {
     const a = typeVar();

@@ -1103,16 +1103,40 @@ test("polymorphic arrays store ints and strings through one API", async () => {
   assert.deepEqual(result.prints, ["array"]);
 });
 
-test("arrays expose length, set, get, map, iter, and fold_left", async () => {
+test("arrays expose length, set, get, map, filter, iter, and fold_left", async () => {
   const result = await runOJaml(`let main =
   let xs = Array.make 3 2 in
   let _ = Array.set xs 1 4 in
   let ys = Array.map (fun x -> x + 1) xs in
-  let _ = Array.iter (fun x -> print x) ys in
-  Array.length ys + Array.fold_left (fun acc x -> acc + x) 0 ys`);
+  let kept = Array.filter (fun x -> x > 3) ys in
+  let _ = Array.iter (fun x -> print x) kept in
+  Array.length ys + Array.length kept + Array.fold_left (fun acc x -> acc + x) 0 kept`);
 
-  assert.equal(result.value, 14);
-  assert.deepEqual(result.prints, [3, 5, 3]);
+  assert.equal(result.value, 9);
+  assert.deepEqual(result.prints, [5]);
+});
+
+test("array filter covers empty, all, none, closures, and polymorphic element values", async () => {
+  const result = await runOJaml(`let main =
+  let empty = Array.filter (fun x -> x > 0) (Array.make 0 1) in
+  let xs = Array.make 4 1 in
+  let _ = Array.set xs 1 2 in
+  let _ = Array.set xs 2 3 in
+  let _ = Array.set xs 3 4 in
+  let threshold = 2 in
+  let evens = Array.filter (fun x -> x > threshold && x mod 2 = 0) xs in
+  let all = Array.filter (fun x -> x >= 1) xs in
+  let none = Array.filter (fun x -> x > 10) xs in
+  let words = Array.make 3 "a" in
+  let _ = Array.set words 1 "tool" in
+  let _ = Array.set words 2 "lang" in
+  let long = Array.filter (fun word -> String.length word > 1) words in
+  let _ = println (to_string evens) in
+  let _ = println (to_string long) in
+  Array.length empty + Array.length evens + Array.length all + Array.length none + Array.length long + Array.get evens 0`);
+
+  assert.equal(result.value, 11);
+  assert.equal(result.output, "[4]\n[tool, lang]\n");
 });
 
 test("runtime checks reject invalid array access", async () => {
@@ -1167,16 +1191,35 @@ test("polymorphic lists store strings", async () => {
   assert.deepEqual(result.prints, ["head"]);
 });
 
-test("lists expose empty, cons, head, tail, is_empty, length, map, iter, and fold_left", async () => {
+test("lists expose empty, cons, head, tail, is_empty, length, map, filter, iter, and fold_left", async () => {
   const result = await runOJaml(`let main =
   let xs = List.cons 2 (List.cons 1 (List.empty ())) in
   let tail = List.tail xs in
   let ys = List.map (fun x -> x * 3) xs in
-  let _ = List.iter (fun x -> print x) ys in
-  if List.is_empty tail then 0 else List.length ys + List.fold_left (fun acc x -> acc + x) 0 ys`);
+  let kept = List.filter (fun x -> x > 3) ys in
+  let _ = List.iter (fun x -> print x) kept in
+  if List.is_empty tail then 0 else List.length ys + List.length kept + List.fold_left (fun acc x -> acc + x) 0 kept`);
+
+  assert.equal(result.value, 9);
+  assert.deepEqual(result.prints, [6]);
+});
+
+test("list filter covers empty, all, none, closures, and polymorphic element values", async () => {
+  const result = await runOJaml(`let main =
+  let empty = List.filter (fun x -> x > 0) (List.empty ()) in
+  let xs = List.cons 1 (List.cons 2 (List.cons 3 (List.cons 4 (List.empty ())))) in
+  let threshold = 2 in
+  let evens = List.filter (fun x -> x > threshold && x mod 2 = 0) xs in
+  let all = List.filter (fun x -> x >= 1) xs in
+  let none = List.filter (fun x -> x > 10) xs in
+  let words = List.cons "a" (List.cons "tool" (List.cons "lang" (List.empty ()))) in
+  let long = List.filter (fun word -> String.length word > 1) words in
+  let _ = println (to_string evens) in
+  let _ = println (to_string long) in
+  List.length empty + List.length evens + List.length all + List.length none + List.length long + List.head evens`);
 
   assert.equal(result.value, 11);
-  assert.deepEqual(result.prints, [6, 3]);
+  assert.equal(result.output, "[4]\n[tool, lang]\n");
 });
 
 test("runtime checks reject empty list head and tail", async () => {
@@ -2334,8 +2377,8 @@ const expectedExampleResults: Map<string, { mainType: string; value: number; out
   ["module-signatures", { mainType: "int", value: 11, output: "count = 11\n" }],
   ["sequencing", { mainType: "int", value: 3, output: "first\nsecond\nitems = [1, 2, 3]\n" }],
   ["pipeline", { mainType: "int", value: 12, output: "nums = [1, 2, 3]\ntotal = 12\n" }],
-  ["arrays", { mainType: "int", value: 60, output: "scores = [10, 20, 30]\nlength = 3\ntotal = 60\n" }],
-  ["lists", { mainType: "int", value: 3, output: "items = [first, second, third]\nfirst = first\nrest = [second, third]\nlength = 3\n" }],
+  ["arrays", { mainType: "int", value: 60, output: "scores = [10, 20, 30]\nhigh_scores = [20, 30]\nlength = 3\ntotal = 60\n" }],
+  ["lists", { mainType: "int", value: 3, output: "items = [first, second, third]\nlong_items = [second]\nfirst = first\nrest = [second, third]\nlength = 3\n" }],
   ["maps", { mainType: "int", value: 1906, output: "years = { Grace: 1906, Ada: 1815 }\nAda = 1815\nGrace = found\n" }],
   ["sets", { mainType: "int", value: 2, output: "names = { Grace, Ada }\nhas Ada = true\n" }],
   ["tuples", { mainType: "int", value: 9, output: "point = (3, 4, 5)\nx = 3\ny = 4\nz = 5\nx + y = 7\nlabeled = (origin, (3, 4, 5))\npoints = [(3, 4, 5), (0, 0, 0)]\n" }],
