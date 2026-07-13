@@ -33,9 +33,9 @@ This matrix tracks features currently implemented by the parser, checker, WASM b
 | `Float.of_int` and `Float.to_int` | yes | test suite |
 | `String.concat/length/split` | yes | test suite |
 | Polymorphic arrays | yes | Collections, Language Tour |
-| `Array.make/get/set/length/append/map/filter/iter/fold_left` | yes | Arrays, Language Tour |
+| `Array.make/get/set/length/append/reverse/map/filter/iter/fold_left` | yes | Arrays, Language Tour |
 | Polymorphic lists | yes | Collections, Higher Order |
-| `List.empty/cons/head/tail/is_empty/length/append/map/filter/iter/fold_left` | yes | Lists, Higher Order |
+| `List.empty/cons/head/tail/is_empty/length/append/reverse/map/filter/iter/fold_left` | yes | Lists, Higher Order |
 | Polymorphic sets | yes | Sets |
 | `Set.empty/add/has/length` | yes | Sets |
 | Polymorphic maps | yes | Collections, Language Tour |

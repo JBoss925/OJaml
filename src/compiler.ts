@@ -1308,6 +1308,10 @@ function inferCallShape(expr: Extract<Expr, { kind: "Call" }>, types: Map<string
     const array = inferSimpleType(expr.args[0], types, openAliases);
     return array.kind === "array" ? array : { kind: "array", elem: unknownShape };
   }
+  if (name === "Array.reverse") {
+    const array = inferSimpleType(expr.args[0], types, openAliases);
+    return array.kind === "array" ? array : { kind: "array", elem: unknownShape };
+  }
   if (name === "Array.map") {
     const mapped = inferFunctionResultShape(inferSimpleType(expr.args[0], types, openAliases));
     return { kind: "array", elem: mapped };
@@ -1326,6 +1330,10 @@ function inferCallShape(expr: Extract<Expr, { kind: "Call" }>, types: Map<string
   if (name === "List.empty") return { kind: "list", elem: unknownShape };
   if (name === "List.cons") return { kind: "list", elem: inferSimpleType(expr.args[0], types, openAliases) };
   if (name === "List.append") {
+    const list = inferSimpleType(expr.args[0], types, openAliases);
+    return list.kind === "list" ? list : { kind: "list", elem: unknownShape };
+  }
+  if (name === "List.reverse") {
     const list = inferSimpleType(expr.args[0], types, openAliases);
     return list.kind === "list" ? list : { kind: "list", elem: unknownShape };
   }
@@ -1589,6 +1597,7 @@ function builtinArities(): Array<[string, number]> {
     ["Array.get", 2],
     ["Array.set", 3],
     ["Array.append", 2],
+    ["Array.reverse", 1],
     ["Array.map", 2],
     ["Array.filter", 2],
     ["Array.iter", 2],
@@ -1600,6 +1609,7 @@ function builtinArities(): Array<[string, number]> {
     ["List.is_empty", 1],
     ["List.length", 1],
     ["List.append", 2],
+    ["List.reverse", 1],
     ["List.map", 2],
     ["List.filter", 2],
     ["List.iter", 2],
@@ -1625,9 +1635,9 @@ function builtinReturnShape(name: string): ValueShape {
   if (name === "String.length") return intShape;
   if (name === "String.split") return { kind: "list", elem: stringShape };
   if (name === "Array.make") return { kind: "array", elem: unknownShape };
-  if (name === "Array.append" || name === "Array.map" || name === "Array.filter") return { kind: "array", elem: unknownShape };
+  if (name === "Array.append" || name === "Array.reverse" || name === "Array.map" || name === "Array.filter") return { kind: "array", elem: unknownShape };
   if (name === "List.empty" || name === "List.cons" || name === "List.tail") return { kind: "list", elem: unknownShape };
-  if (name === "List.append" || name === "List.map" || name === "List.filter") return { kind: "list", elem: unknownShape };
+  if (name === "List.append" || name === "List.reverse" || name === "List.map" || name === "List.filter") return { kind: "list", elem: unknownShape };
   if (name === "List.iter") return unitShape;
   if (name === "Set.empty" || name === "Set.add") return { kind: "set", elem: unknownShape };
   if (name === "Map.empty" || name === "Map.set") return { kind: "map", key: unknownShape, value: unknownShape };
@@ -1797,6 +1807,29 @@ function emitStdlibWat(): string {
   (local.get $result)
 )
 
+(func $Array_reverse (param $array i32) (result i32)
+  (local $length i32)
+  (local $result i32)
+  (local $i i32)
+  (local.set $length (call $Array_length (local.get $array)))
+  (local.set $result (call $Array_make (local.get $length) (i32.const 0)))
+  (loop $loop
+    (if (i32.lt_s (local.get $i) (local.get $length))
+      (then
+        (drop (call $Array_set
+          (local.get $result)
+          (local.get $i)
+          (call $Array_get
+            (local.get $array)
+            (i32.sub (i32.sub (local.get $length) (local.get $i)) (i32.const 1)))))
+        (local.set $i (i32.add (local.get $i) (i32.const 1)))
+        (br $loop)
+      )
+    )
+  )
+  (local.get $result)
+)
+
 (func $Array_filter (param $f i32) (param $array i32) (result i32)
   (local $length i32)
   (local $result i32)
@@ -1935,6 +1968,22 @@ function emitStdlibWat(): string {
       (call $List_cons
         (call $List_head (local.get $left))
         (call $List_append (call $List_tail (local.get $left)) (local.get $right)))))
+)
+
+(func $List_reverse (param $list i32) (result i32)
+  (local $result i32)
+  (local $cursor i32)
+  (local.set $cursor (local.get $list))
+  (loop $loop
+    (if (i32.ne (local.get $cursor) (i32.const 0))
+      (then
+        (local.set $result (call $List_cons (call $List_head (local.get $cursor)) (local.get $result)))
+        (local.set $cursor (call $List_tail (local.get $cursor)))
+        (br $loop)
+      )
+    )
+  )
+  (local.get $result)
 )
 
 (func $List_filter (param $f i32) (param $list i32) (result i32)

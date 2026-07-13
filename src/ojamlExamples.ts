@@ -226,9 +226,11 @@ let main =
   in
   let bonus = Array.make 1 40 in
   let all_scores = Array.append scores bonus in
+  let reversed_scores = Array.reverse all_scores in
   let high_scores = Array.filter (fun score -> score >= 20) all_scores in
   let _ = println (String.concat "scores = " (to_string scores)) in
   let _ = println (String.concat "all_scores = " (to_string all_scores)) in
+  let _ = println (String.concat "reversed_scores = " (to_string reversed_scores)) in
   let _ = println (String.concat "high_scores = " (to_string high_scores)) in
   let _ = println (String.concat "length = " (to_string (Array.length scores))) in
   let _ = println (String.concat "total = " (to_string total)) in
@@ -254,9 +256,11 @@ let main =
   in
   let extra = List.cons "fourth" (List.empty ()) in
   let all_items = List.append items extra in
+  let reversed_items = List.reverse all_items in
   let long_items = List.filter (fun item -> String.length item > 5) all_items in
   let _ = println (String.concat "items = " (to_string items)) in
   let _ = println (String.concat "all_items = " (to_string all_items)) in
+  let _ = println (String.concat "reversed_items = " (to_string reversed_items)) in
   let _ = println (String.concat "long_items = " (to_string long_items)) in
   let _ = println (String.concat "first = " first) in
   let _ = println (String.concat "rest = " (to_string rest)) in
